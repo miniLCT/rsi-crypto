@@ -16,6 +16,7 @@ def test_feature_contract(panel, name):
     r = contract.check_feature(panel, name, n_cuts=3, future=100)
     assert r["causal"], r
     assert r["lookback_ok"], r
+    assert r["unit_invariant"], r
 
 
 def test_lookahead_is_detected(panel):
@@ -38,10 +39,11 @@ def test_short_lookback_is_detected(panel):
         del registry.REGISTRY["bad_lb"]
 
 
-def test_live_window_matches_batch(panel):
-    """The live path (trailing window + build_last) reproduces batch model inputs bit-for-bit in float32."""
-    spec = FeatureSpec(include=["all"], transform="both")
-    uni = UniverseSpec(kind="top_liquid", size=8, adv_days=10)
+@pytest.mark.parametrize("transform,neutralize", [("both", False), ("zscore", True)])
+def test_live_window_matches_batch(panel, transform, neutralize):
+    """The live path (trailing window + build_last) reproduces batch model inputs in float32."""
+    spec = FeatureSpec(include=["all"], transform=transform, neutralize=neutralize)
+    uni = UniverseSpec(kind="top_liquid", size=8, keep_rank=8, adv_days=10, min_history_days=10)
     mask = compute_universe(panel, uni)
     batch = build_batch(panel, spec, mask, use_cache=False)
     W = max(spec.lookback(), uni.lookback()) + 8
@@ -64,7 +66,7 @@ def test_xs_rank_ties_and_mask():
 
 
 def test_universe_is_causal(panel):
-    uni = UniverseSpec(kind="top_liquid", size=5, adv_days=10)
+    uni = UniverseSpec(kind="top_liquid", size=5, keep_rank=5, adv_days=10, min_history_days=10)
     full = compute_universe(panel, uni)
     cut = 2000
     part = compute_universe(panel.slice(0, cut), uni)

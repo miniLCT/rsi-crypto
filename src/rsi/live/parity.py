@@ -18,7 +18,7 @@ from rsi.harness.release import verify_manifest
 from rsi.harness.runner import full_panel
 from rsi.harness.spec import ExperimentSpec
 from rsi.models.core import Model
-from rsi.universe import compute_universe
+from rsi.universe import universe_masks
 from rsi.utils.hashing import stable_hash
 from rsi.utils.timeutil import to_ms
 
@@ -34,7 +34,7 @@ def check(model_dir: Path, bars: int = 96, end: str | None = None) -> dict:
     panel = full_panel(spec)
     if end:
         panel = panel.slice(0, panel.index_of(end))
-    mask = compute_universe(panel, spec.universe)
+    _, mask = universe_masks(panel, spec.universe)
     names = spec.features.columns()
     batch = build_batch(panel, spec.features, mask, mask_key=stable_hash(spec.universe.model_dump()))
     W = manifest["window_bars"]
@@ -42,7 +42,7 @@ def check(model_dir: Path, bars: int = 96, end: str | None = None) -> dict:
     worst_name = None
     for t in range(panel.T - bars, panel.T):
         win = panel.slice(t + 1 - W, t + 1)
-        m_live = compute_universe(win, spec.universe)[-1]
+        m_live = universe_masks(win, spec.universe)[1][-1]
         mask_mismatch += int((m_live != mask[t]).sum())
         live_cols = build_last(win, spec.features, m_live)
         idx = np.flatnonzero(mask[t])
@@ -69,7 +69,7 @@ def check_journal(model_dir: Path, state_dir: Path, tol: float = 1e-4) -> pd.Dat
         return pd.DataFrame()
     dec = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
     panel = full_panel(spec)
-    mask = compute_universe(panel, spec.universe)
+    _, mask = universe_masks(panel, spec.universe)
     names = spec.features.columns()
     batch = build_batch(panel, spec.features, mask, mask_key=stable_hash(spec.universe.model_dump()))
     rows = []

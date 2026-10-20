@@ -2,7 +2,7 @@
 mode: mainnet
 model_dir: models/CHANGE_ME
 state_dir: live_state/mainnet
-leverage: 3
+exchange_leverage: 3                # 1-10, capped per symbol by leverage brackets
 symbols: null
-risk_overrides: {max_gross: 1.0, dd_halt: 0.15, daily_loss_halt: 0.04}
+risk_overrides: {vol_target: 0.15}   # start below the researched exposure
 exec_delay_s: 4

@@ -51,6 +51,7 @@ def export(run_id: str, out_dir: Path | None = None, ledger: Ledger | None = Non
     ledger = ledger or Ledger()
     row = ledger.get(run_id)
     spec = ExperimentSpec(**json.loads(row["spec_json"]))
+    research_m = json.loads(row["metrics_json"])
     panel = full_panel(spec)
     prep = prepare(spec, panel)
     end = panel.T
@@ -70,13 +71,22 @@ def export(run_id: str, out_dir: Path | None = None, ledger: Ledger | None = Non
         "spec": spec.model_dump(),
         "features": {n: {"src_hash": registry.get(n).src_hash, "lookback": registry.get(n).lookback} for n in base},
         "columns": spec.features.columns(),
-        "window_bars": int(max(spec.features.lookback(), spec.universe.lookback(panel.interval)) + 8),
+        "window_bars": live_window_bars(spec, panel.interval),
         "interval": panel.interval,
         "panel_top_k": spec.panel_top_k,
+        # RISK-06: thresholds at the harness eval vol target; live scales them by its own exposure
+        "disaster": {"day_loss": research_m.get("disaster_day_loss"), "max_dd": research_m.get("disaster_max_dd"),
+                     "eval_vol_target": research_m.get("eval_vol_target", h.gates.eval_vol_target)},
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1))
     log.info(f"exported {out}")
     return out
+
+
+def live_window_bars(spec: ExperimentSpec, interval: str = "30m") -> int:
+    """Trailing bars the live engine needs so every input equals its full-history value."""
+    from rsi.engine.backtest import CONTEXT_LOOKBACK
+    return int(max(spec.features.lookback(), spec.universe.lookback(interval), CONTEXT_LOOKBACK) + 8)
 
 
 def verify_manifest(manifest: dict) -> list[str]:

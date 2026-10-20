@@ -1,0 +1,14 @@
+name: ts_eth_lgbm
+parent: ts_btc_lgbm
+hypothesis: >
+  Same single-instrument directional design as ts_btc_lgbm applied to ETHUSDT (T5.4 baseline).
+universe: {kind: fixed, symbols: [ETHUSDT]}
+features: {include: [all, "-group:carry"], transform: raw}
+label: {horizon: 8, xs_demean: false, vol_norm: true}
+model:
+  kind: lgbm
+  train_stride: 1
+  num_boost_round: 300
+  params: {learning_rate: 0.02, num_leaves: 7, min_data_in_leaf: 400, feature_fraction: 0.5, lambda_l2: 50}
+strategy: {kind: ts_directional, rebalance_bars: 2, entry_z: 1.0, exit_z: 0.25, max_names: 1, gross: 1.0}
+risk: {max_weight: 1.0, max_gross: 1.0, vol_target: 0.4, hold_horizon_bars: 8}

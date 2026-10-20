@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from rsi.engine.portfolio import RiskSpec
 from rsi.features.featureset import FeatureSpec
@@ -31,6 +31,12 @@ class ExperimentSpec(BaseModel):
     # optional overrides of the walk-forward cadence (cheaper iterations); gates still apply
     test_months: int | None = None
     search_space: dict[str, list[Any]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _short_needs_stop(self):
+        if self.strategy.allow_short and self.risk.hard_stop_vol is None:
+            raise ValueError("DEC-09: strategies that can short must set risk.hard_stop_vol")
+        return self
 
     def content(self) -> dict:
         d = self.model_dump(exclude={"name", "hypothesis", "parent", "search_space"})

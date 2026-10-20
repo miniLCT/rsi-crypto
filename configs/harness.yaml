@@ -30,11 +30,14 @@ costs:
   max_half_spread_bps: 30.0
   impact_eta: 0.5              # square-root impact on daily vol
   delist_penalty_bps: 200.0    # forced exit when a symbol stops printing
+  liquidation_fee_bps: 100.0   # charged on the liquidated notional in the backtest liquidation model
 
 capital:
   initial_usd: 10000.0
 
 gates:
+  # every gated backtest runs at this vol target, so drawdown gates cannot be passed by shrinking exposure
+  eval_vol_target: 0.30
   # minimum bar for a run to be marked `pass` (net of all costs, walk-forward OOS)
   min_sharpe: 1.0
   min_dsr: 0.90                # deflated Sharpe probability, n_trials from the ledger
@@ -46,3 +49,11 @@ gates:
   # holdout check before a model may go live
   holdout_min_sharpe_ratio: 0.4  # holdout sharpe >= ratio * research sharpe
   holdout_min_sharpe: 0.3
+
+disaster:
+  # RISK-06: live disaster halt calibrated from day-block bootstrap of OOS bar returns
+  block_bars: 48
+  n_boot: 2000
+  tail: 0.01
+  worst_day_mult: 1.5
+  day_vol_mult: 4.0

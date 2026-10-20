@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from rsi.config import data_config, harness_config, repo_root, runs_dir
+from rsi.config import data_config, harness_config, harness_hash, repo_root, runs_dir
 from rsi.data.panel import Panel, build_panel
 from rsi.engine.backtest import BacktestResult, market_context, run_backtest
 from rsi.eval import metrics as M
@@ -22,7 +22,7 @@ from rsi.harness.spec import ExperimentSpec
 from rsi.labels import fwd_logret, make_label
 from rsi.models.core import Model
 from rsi.splits import Fold, walk_forward
-from rsi.universe import compute_universe
+from rsi.universe import universe_masks
 from rsi.utils.hashing import stable_hash
 from rsi.utils.log import get_logger
 
@@ -55,7 +55,8 @@ def research_panel(spec: ExperimentSpec) -> Panel:
 @dataclass
 class Prepared:
     panel: Panel
-    mask: np.ndarray
+    mask: np.ndarray        # entry universe: training rows, new positions
+    hold: np.ndarray        # hold buffer (superset): scored every bar so held names can be managed
     cols: dict
     names: list[str]
     y: np.ndarray
@@ -63,12 +64,12 @@ class Prepared:
 
 
 def prepare(spec: ExperimentSpec, panel: Panel) -> Prepared:
-    mask = compute_universe(panel, spec.universe)
+    mask, hold = universe_masks(panel, spec.universe)
     names = spec.features.columns()
     contract.ensure_contract(panel, spec.features.base_names())
-    cols = build_batch(panel, spec.features, mask, mask_key=stable_hash(spec.universe.model_dump()))
+    cols = build_batch(panel, spec.features, hold, mask_key=stable_hash(spec.universe.model_dump()))
     y = make_label(panel, spec.label, mask, valid_until=panel.T)
-    return Prepared(panel, mask, cols, names, y, market_context(panel))
+    return Prepared(panel, mask, hold, cols, names, y, market_context(panel))
 
 
 def _rows(mask: np.ndarray, y: np.ndarray | None, i0: int, i1: int, stride: int = 1) -> tuple[np.ndarray, np.ndarray]:
@@ -94,7 +95,7 @@ def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold) -> Model:
 
 
 def predict_rows(prep: Prepared, model: Model, i0: int, i1: int, out: np.ndarray) -> None:
-    t, s = _rows(prep.mask, None, i0, i1)
+    t, s = _rows(prep.hold, None, i0, i1)
     if len(t):
         out[t, s] = model.predict(stack(prep.cols, prep.names, t, s))
 
@@ -121,17 +122,28 @@ def fold_metrics(res: BacktestResult, panel: Panel, folds: list[Fold], bars_per_
         if len(seg) < 3:
             continue
         d = M.daily_returns(seg.index[1:].to_numpy(), seg.to_numpy()[1:], float(seg.iloc[0]))
-        out.append({"k": f.k, "start": str(pd.Timestamp(a, unit="ms").date()), "sharpe": M.sharpe(d.to_numpy(), 365),
+        r = seg.to_numpy()[1:] / seg.to_numpy()[:-1] - 1
+        out.append({"k": f.k, "start": str(pd.Timestamp(a, unit="ms").date()), "sharpe": M.sharpe(r, bars_per_year),
                     "ret": float(seg.iloc[-1] / seg.iloc[0] - 1), "mdd": M.max_drawdown(seg.to_numpy()), "days": len(d)})
     return out
 
 
+def scored_risk(spec: ExperimentSpec):
+    """T4.8: gated backtests always run at the harness vol target (exposure is a live preference, not alpha)."""
+    return spec.risk.model_copy(update={"vol_target": harness_config().gates.eval_vol_target})
+
+
 def evaluate(prep: Prepared, spec: ExperimentSpec, score: np.ndarray, t0: int, t1: int, folds: list[Fold],
              n_trials: int, sr_var: float | None) -> dict:
+    from rsi.eval import disaster
     h = harness_config()
-    res = run_backtest(prep.panel, score, prep.mask, spec.strategy, spec.risk, h.costs, h.capital.initial_usd,
-                       t0, t1, h.bars_per_year, context=prep.context)
+    res = run_backtest(prep.panel, score, prep.mask, spec.strategy, scored_risk(spec), h.costs, h.capital.initial_usd,
+                       t0, t1, h.bars_per_year, context=prep.context, hold=prep.hold)
     m = M.summarize(res, h.bars_per_year, n_trials, sr_var)
+    th = disaster.calibrate(res.returns, h.disaster)
+    m.update({"liquidations": res.liquidations, "disaster_day_loss": th["day_loss"], "disaster_max_dd": th["max_dd"],
+              "disaster_triggers": disaster.count_triggers(res.times, res.equity, res.equity0, th),
+              "eval_vol_target": h.gates.eval_vol_target})
     fwd = fwd_logret(prep.panel, spec.label.horizon)
     m.update({f"oos_{k}": v for k, v in M.ic_stats(score, fwd, prep.mask, slice(t0, t1)).items()})
     fm = fold_metrics(res, prep.panel, folds, h.bars_per_year)
@@ -141,6 +153,8 @@ def evaluate(prep: Prepared, spec: ExperimentSpec, score: np.ndarray, t0: int, t
 def run(spec: ExperimentSpec, note: str | None = None, save: bool = True, ledger: Ledger | None = None) -> dict:
     h = harness_config()
     ledger = ledger or Ledger()
+    hh = harness_hash()
+    ledger.check_harness(h.version, hh)
     t_start = time.time()
     panel = research_panel(spec)
     prep = prepare(spec, panel)
@@ -172,7 +186,7 @@ def run(spec: ExperimentSpec, note: str | None = None, save: bool = True, ledger
             res.trades.to_parquet(d / "trades.parquet")
         (d / "report.md").write_text(render_report(spec, summary))
         ledger.add_run({
-            "run_id": run_id, "name": spec.name, "parent": spec.parent, "harness_version": h.version,
+            "run_id": run_id, "name": spec.name, "parent": spec.parent, "harness_version": h.version, "harness_hash": hh,
             "spec_hash": spec.spec_hash, "spec_json": json.dumps(spec.model_dump()), "git_sha": git_sha(),
             "data_fp": panel.fingerprint, "status": status, "sharpe": m["sharpe"], "dsr": m["dsr"],
             "max_dd": m["max_drawdown"], "daily_sr": m["daily_sr"], "metrics_json": json.dumps(m, default=float),
@@ -180,9 +194,28 @@ def run(spec: ExperimentSpec, note: str | None = None, save: bool = True, ledger
         })
         if status == "champion":
             ledger.set_champion(h.version, run_id)
+        append_rsi_log(spec, summary)
     log.info(f"[{status}] {spec.name} sharpe={m['sharpe']:.2f} dsr={m['dsr']:.2f} mdd={m['max_drawdown']:.1%} "
              f"cagr={m['cagr']:.1%} trades={m['n_trades']} ({summary['elapsed_s']}s) -> {run_id}")
     return summary
+
+
+def append_rsi_log(spec: ExperimentSpec, s: dict) -> None:
+    """HRN-08: one auto-generated entry per run; the proposer adds the conclusion underneath."""
+    p = repo_root() / "docs" / "rsi_log.md"
+    m = s["metrics"]
+    failed = [k for k, v in s["gates"]["checks"].items() if not v["ok"]]
+    entry = (f"\n### {s['run_id']} · {spec.name} · **{s['status']}**\n"
+             f"- date: {time.strftime('%Y-%m-%d %H:%M')} · parent: {spec.parent or '-'} · trials so far: {s['n_trials']}\n"
+             f"- hypothesis: {spec.hypothesis.strip() or '-'}\n"
+             f"- sharpe {m['sharpe']:.2f} · dsr {m['dsr']:.2f} · cagr {m['cagr']:.1%} · mdd {m['max_drawdown']:.1%} · "
+             f"turnover {m['turnover_ann']:.0f}x · fees {m['fees_frac']:.1%} · funding {m['funding_frac']:.1%} · "
+             f"long {m['long_pnl_frac']:+.1%} / short {m['short_pnl_frac']:+.1%} · ic {m.get('oos_ic', 0):.4f}\n"
+             f"- failed gates: {', '.join(failed) or 'none'} · {s['champion_check']}\n")
+    if not p.exists():
+        p.write_text("# RSI research log\n\nAuto-generated entries per run (HRN-08); add a `- conclusion:` line under each.\n")
+    with open(p, "a") as f:
+        f.write(entry)
 
 
 def _mean_importance(finfo: list[dict]) -> list[tuple[str, float]]:

@@ -4,5 +4,5 @@ model_dir: models/CHANGE_ME          # output of `rsi export <run_id>`
 state_dir: live_state/paper
 capital_usd: 10000
 symbols: null                         # e.g. [BTCUSDT] to restrict to a single coin
-risk_overrides: {}                    # may only tighten, e.g. {max_gross: 1.0}
+risk_overrides: {}                    # exposure prefs (vol_target, max_gross <= 10) or tighter limits
 exec_delay_s: 4

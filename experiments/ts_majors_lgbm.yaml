@@ -10,5 +10,5 @@ model:
   train_stride: 1
   num_boost_round: 300
   params: {learning_rate: 0.02, num_leaves: 15, min_data_in_leaf: 1000, feature_fraction: 0.5, lambda_l2: 50}
-strategy: {kind: ts_directional, rebalance_bars: 2, entry_z: 1.0, exit_z: 0.25, max_names: 6, gross: 1.5}
-risk: {max_weight: 0.4, max_gross: 2.0, vol_target: 0.35, stop_loss_vol: 3.0}
+strategy: {kind: ts_directional, rebalance_bars: 2, entry_z: 1.0, exit_z: 0.25, max_names: 6, gross: 1.0}
+risk: {max_weight: 0.25, max_gross: 1.0, vol_target: 0.35, hold_horizon_bars: 8}

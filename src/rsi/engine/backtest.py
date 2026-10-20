@@ -1,8 +1,9 @@
 """Bar-stepping backtest. Event order per bar t (identical to the live loop):
 
-  1. mark to close[t]; record equity
-  2. decision: strategy targets -> risk overlays (stops, halts, caps) -> target qty  (data <= close[t])
-  3. boundary t->t+1: mark to open[t+1], settle funding printed at open[t+1],
+  1. intrabar hard stops on bar t from its high/low (positions were filled at open[t])
+  2. mark to close[t]; record equity
+  3. decision: strategy targets -> risk overlays (close exits, halts, caps) -> target qty  (data <= close[t])
+  4. boundary t->t+1: mark to open[t+1], settle funding printed at open[t+1],
      force-close names that stopped printing, fill target qty at open[t+1] with costs
 """
 from __future__ import annotations
@@ -34,6 +35,8 @@ class BacktestResult:
     turnover_usd: float
     equity0: float
     open_pnl_usd: float = 0.0
+    liquidations: int = 0
+    stop_exits: int = 0
 
     @property
     def returns(self) -> np.ndarray:
@@ -43,6 +46,9 @@ class BacktestResult:
     def frame(self) -> pd.DataFrame:
         return pd.DataFrame({"time": pd.to_datetime(self.times, unit="ms"), "equity": self.equity, "gross": self.gross,
                              "net": self.net, "n_long": self.n_long, "n_short": self.n_short})
+
+
+CONTEXT_LOOKBACK = 30 * 48 + 1   # bars needed by market_context (30d ADV); part of the live window contract
 
 
 def market_context(panel: Panel) -> tuple[np.ndarray, np.ndarray]:
@@ -55,11 +61,11 @@ def market_context(panel: Panel) -> tuple[np.ndarray, np.ndarray]:
 
 def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: StrategySpec, risk: RiskSpec,
                  costs: CostCfg, equity0: float, t0: int, t1: int, bars_per_year: int = 17520,
-                 context: tuple[np.ndarray, np.ndarray] | None = None) -> BacktestResult:
+                 context: tuple[np.ndarray, np.ndarray] | None = None, hold: np.ndarray | None = None) -> BacktestResult:
     step = interval_ms(panel.interval)
     T, S = panel.T, panel.S
     t1 = min(t1, T)
-    o = np.asarray(panel["open"]); c = np.asarray(panel["close"])
+    o = np.asarray(panel["open"]); h = np.asarray(panel["high"]); lo = np.asarray(panel["low"]); c = np.asarray(panel["close"])
     fr = np.asarray(panel["funding_rate"])
     adv, dvol = context if context is not None else market_context(panel)
     port = Portfolio(panel.symbols, equity0, costs, risk, bars_per_year, step)
@@ -70,6 +76,9 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
     with np.errstate(invalid="ignore", divide="ignore"):
         for k, t in enumerate(range(t0, t1)):
             bar_no = int(times[t] // step)
+            if k > 0:
+                port.check_hard_stops(int(times[t]), bar_no, o[t], h[t], lo[t], adv[t - 1], dvol[t - 1])
+                port.check_liquidation(int(times[t]), h[t], lo[t], costs.liquidation_fee_bps)
             port.mark_to(c[t])
             E = port.equity
             eq[k] = E
@@ -79,8 +88,9 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
             nl[k] = int((port.qty > 0).sum()); ns[k] = int((port.qty < 0).sum())
             if t > 0:
                 port.record_book_return(c[t] / c[t - 1] - 1)
-            w = builder.step(bar_no, score[t], mask[t], dvol[t])
-            q = port.target_qty(int(times[t] + step), bar_no, w, c[t], adv[t], dvol[t])
+            hrow = hold[t] if hold is not None else None
+            w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow)
+            q = port.target_qty(int(times[t] + step), bar_no, w, c[t], adv[t], dvol[t], mask[t])
             if t + 1 >= T or k == n - 1:
                 break
             port.mark_to(o[t + 1])
@@ -92,4 +102,4 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
             port.rebalance(q, o[t + 1], adv[t], dvol[t], int(times[t + 1]))
     tr = pd.DataFrame([r.__dict__ for r in port.trades])
     return BacktestResult(times[t0:t0 + len(eq)], eq, gross, net, nl, ns, tr, port.fees_usd, port.funding_usd,
-                          port.turnover_usd, equity0, float(port.ep_pnl[port.qty != 0].sum()))
+                          port.turnover_usd, equity0, float(port.ep_pnl[port.qty != 0].sum()), port.liquidations)

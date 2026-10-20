@@ -15,6 +15,11 @@ symbol_filter:
   exclude: [BTCDOMUSDT, DEFIUSDT, FOOTBALLUSDT, BLUEBIRDUSDT, ALLUSDT]
   # exchangeInfo.underlyingType; symbols no longer listed there (old delistings) are kept unless excluded above
   underlying_types: [COIN]
+quality:
+  # DATA-03, from `rsi data quality` on the full mirror (682 symbols, 0 bad OHLC, 61 with gap periods,
+  # 146 with >5% zero-volume bars, mostly flat post-delisting prints): a symbol qualifies for the universe
+  # only when >= 95% of the bars in the ADV and listing-age windows are present.
+  min_window_coverage: 0.95
 download:
   concurrency: 48
   verify_checksum: true

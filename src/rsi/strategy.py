@@ -37,25 +37,35 @@ class TargetBuilder:
     def is_rebalance(self, bar_number: int) -> bool:
         return bar_number % self.spec.rebalance_bars == 0
 
-    def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None) -> np.ndarray:
-        """score/mask/vol: [S] rows for the decision bar. Returns target weights [S]."""
-        alive = mask & np.isfinite(score)
+    def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None,
+             hold: np.ndarray | None = None) -> np.ndarray:
+        """score/mask/vol/hold: [S] rows for the decision bar. Returns target weights [S].
+
+        `mask` = names that may be entered; `hold` (superset) = names an existing position may stay in.
+        """
+        hold = mask if hold is None else (hold | mask)
+        held = self.prev != 0
         if not self.is_rebalance(bar_number):
-            w = np.where(mask, self.prev, 0.0)   # names leaving the universe are closed immediately
-        elif self.spec.kind == "xs_longshort":
-            w = self._xs(score, alive, vol)
+            w = np.where(hold, self.prev, 0.0)   # names leaving the hold buffer are closed immediately
         else:
-            w = self._ts(score, alive)
+            ok = np.isfinite(score)
+            entry = mask & ok
+            keep = hold & held & ok
+            if self.spec.kind == "xs_longshort":
+                w = self._xs(score, entry, keep, vol)
+            else:
+                w = self._ts(score, entry, keep)
         self.prev = w
         return w
 
     # ------------------------------------------------------------------ cross-sectional
-    def _xs(self, score: np.ndarray, alive: np.ndarray, vol: np.ndarray | None) -> np.ndarray:
+    def _xs(self, score: np.ndarray, entry: np.ndarray, keep: np.ndarray, vol: np.ndarray | None) -> np.ndarray:
         sp = self.spec
         w = np.zeros_like(score, dtype=np.float64)
+        alive = entry | keep
         idx = np.flatnonzero(alive)
         n = len(idx)
-        if n < sp.min_names:
+        if entry.sum() < sp.min_names:
             return w
         order = idx[np.argsort(-score[idx], kind="stable")]       # best first
         rank = np.empty(len(score)); rank[:] = np.nan
@@ -65,11 +75,13 @@ class TargetBuilder:
             sides.append((+1, sp.long_frac, rank))
         if sp.allow_short:
             sides.append((-1, sp.short_frac, 1 - rank))
+        n_entry = int(entry.sum())
         for sign, frac, r in sides:
-            k = max(1, int(np.floor(frac * n)))
-            held = np.flatnonzero((np.sign(self.prev) == sign) & alive & (r <= frac + sp.exit_buffer))
+            k = max(1, int(np.floor(frac * n_entry)))
+            held = np.flatnonzero((np.sign(self.prev) == sign) & keep & (r <= frac + sp.exit_buffer))
             held = held[np.argsort(r[held])][:k]
-            cand = [i for i in np.argsort(np.where(alive, r, np.inf)) if np.isfinite(r[i]) and i not in set(held)]
+            held_set = set(held.tolist())
+            cand = [i for i in np.argsort(np.where(entry, r, np.inf)) if entry[i] and i not in held_set]
             chosen = list(held) + cand[: k - len(held)]
             chosen = np.array(chosen, dtype=int)
             if sp.weighting == "score":
@@ -83,16 +95,16 @@ class TargetBuilder:
         return w
 
     # ------------------------------------------------------------------ time-series
-    def _ts(self, z: np.ndarray, alive: np.ndarray) -> np.ndarray:
+    def _ts(self, z: np.ndarray, entry: np.ndarray, keep: np.ndarray) -> np.ndarray:
         sp = self.spec
         unit = sp.gross / sp.max_names
         pos = np.sign(self.prev)
         new = np.zeros_like(pos)
-        zz = np.where(alive, z, 0.0)
-        long_in = (zz > sp.entry_z) & sp.allow_long
-        short_in = (zz < -sp.entry_z) & sp.allow_short
-        keep_long = (pos > 0) & (zz > sp.exit_z) & alive
-        keep_short = (pos < 0) & (zz < -sp.exit_z) & alive
+        zz = np.where(entry | keep, z, 0.0)
+        long_in = (zz > sp.entry_z) & sp.allow_long & entry
+        short_in = (zz < -sp.entry_z) & sp.allow_short & entry
+        keep_long = (pos > 0) & (zz > sp.exit_z) & (keep | entry)
+        keep_short = (pos < 0) & (zz < -sp.exit_z) & (keep | entry)
         new[keep_long] = 1
         new[keep_short] = -1
         new[long_in] = 1

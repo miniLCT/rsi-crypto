@@ -3,7 +3,7 @@ hypothesis: >
   A gradient-boosted ranker over the full feature library, trained on vol-normalised,
   cross-sectionally demeaned 4h forward returns, extracts a market-neutral signal from
   the 50 most liquid perps that survives realistic taker costs at a 1h rebalance.
-universe: {kind: top_liquid, size: 50, adv_days: 30}
+universe: {kind: top_liquid, size: 100, keep_rank: 120}
 features: {include: [all], transform: rank}
 label: {horizon: 8, xs_demean: true, vol_norm: true, clip: 5.0}
 model:
@@ -19,11 +19,10 @@ strategy:
   exit_buffer: 0.1
   gross: 1.0
 risk:
-  max_gross: 2.0
-  max_weight: 0.1
+  max_gross: 1.0
+  max_weight: 0.05
   vol_target: 0.3
-  stop_loss_vol: 4.0
-  dd_halt: 0.25
+  hold_horizon_bars: 8
 search_space:
   label.horizon: [4, 8, 16, 48]
   strategy.rebalance_bars: [1, 2, 4, 8]
@@ -32,4 +31,5 @@ search_space:
   strategy.exit_buffer: [0.0, 0.1, 0.2]
   model.params.num_leaves: [15, 31, 63]
   model.params.min_data_in_leaf: [500, 2000, 8000]
-  universe.size: [30, 50, 80]
+  universe.size: [50, 100]
+  features.neutralize: [false, true]

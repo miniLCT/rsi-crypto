@@ -2,9 +2,9 @@ name: xs_factor_reversal_1d
 hypothesis: >
   Model-free control: 1-day cross-sectional reversal among liquid perps (losers bounce,
   winners fade). Establishes how much of any ML result is plain reversal.
-universe: {kind: top_liquid, size: 50, adv_days: 30}
+universe: {kind: top_liquid, size: 100, keep_rank: 120}
 features: {include: [ret_48], transform: rank}
 label: {horizon: 8}
 model: {kind: factor, weights: {"r:ret_48": -1.0}}
 strategy: {kind: xs_longshort, rebalance_bars: 4, long_frac: 0.2, short_frac: 0.2, exit_buffer: 0.1}
-risk: {vol_target: 0.3, stop_loss_vol: 4.0}
+risk: {vol_target: 0.3, hold_horizon_bars: 8}

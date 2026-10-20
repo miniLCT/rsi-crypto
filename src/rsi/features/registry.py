@@ -96,6 +96,7 @@ class Feature:
 
 
 REGISTRY: dict[str, Feature] = {}
+NON_SIGNAL_GROUPS = {"size"}
 
 
 def register(name: str, lookback: int, group: str, doc: str = ""):
@@ -119,13 +120,16 @@ def get(name: str) -> Feature:
 
 
 def resolve(patterns: list[str]) -> list[str]:
-    """Expand feature selectors: exact names, `group:<g>`, glob patterns, or `all`."""
+    """Expand feature selectors: exact names, `group:<g>`, glob patterns, `-<selector>` to drop, or `all`.
+
+    `all` means all *signal* features; group `size` (liquidity levels) is excluded and must be named.
+    """
     import fnmatch
     _ensure_loaded()
     out: list[str] = []
     for p in patterns:
         if p == "all":
-            hits = list(REGISTRY)
+            hits = [n for n, f in REGISTRY.items() if f.group not in NON_SIGNAL_GROUPS]
         elif p.startswith("group:"):
             hits = [n for n, f in REGISTRY.items() if f.group == p[6:]]
         elif p.startswith("-"):

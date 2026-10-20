@@ -33,7 +33,7 @@ from rsi.live.broker import BinanceBroker, PaperBroker, parse_rules
 from rsi.live.feed import LiveFeed
 from rsi.models.core import Model
 from rsi.strategy import TargetBuilder
-from rsi.universe import UniverseSpec, compute_universe
+from rsi.universe import universe_masks
 from rsi.utils.log import add_file_handler, get_logger
 from rsi.utils.timeutil import interval_ms, ms_to_str, now_ms
 
@@ -46,27 +46,37 @@ class LiveConfig(BaseModel):
     state_dir: str = "live_state/paper"
     capital_usd: float = 10000.0
     symbols: list[str] | None = None            # restrict trading to these (single-coin deployment)
-    leverage: int = 3
+    exchange_leverage: int = 3                  # DEC-06: per-symbol margin multiple, 1-10 (capped by leverage brackets)
     risk_overrides: dict = Field(default_factory=dict)
+    margin_ratio_max: float = 0.30              # RISK-05: maint margin / margin balance above this -> scale down
     exec_delay_s: float = 4.0
     api_key_env: str = "BINANCE_API_KEY"
     api_secret_env: str = "BINANCE_API_SECRET"
     ed25519_key_path_env: str = "BINANCE_ED25519_KEY"
     alert_webhook_env: str = "RSI_ALERT_WEBHOOK"
-    max_missing_frac: float = 0.2               # skip trading when too much of the universe has no fresh bar
+    min_coverage: float = 0.98                  # RISK-04: below this share of fresh universe bars, no new risk
+    max_reject_rate: float = 0.3                # RISK-04: order reject-rate breaker (last 20 orders)
+    open_deadline_s: float = 120.0              # LIVE-01: opening legs not sent by bar close + this are dropped
+    delist_horizon_days: float = 7.0            # close & blacklist contracts with a delivery date this close
 
 
-TIGHTEN_ONLY = {"max_gross": min, "max_weight": min, "max_net": min, "vol_target": min, "dd_halt": min,
-                "daily_loss_halt": min, "adv_cap": min, "stop_loss_vol": min, "cooldown_bars": max, "dd_halt_bars": max}
+# exposure is a live risk preference (DEC-06), bounded by RiskSpec validation (<= 10x)
+PREFERENCE = {"max_gross", "vol_target", "exchange_leverage"}
+# everything else may only be tightened relative to what was researched
+TIGHTEN_ONLY = {"max_weight": min, "max_net": min, "adv_cap": min, "hard_stop_vol": min, "stop_loss_vol": min,
+                "dd_halt": min, "daily_loss_halt": min, "cooldown_bars": max, "margin_usage_max": min}
 
 
 def tighten(risk: RiskSpec, overrides: dict) -> RiskSpec:
     d = risk.model_dump()
     for k, v in overrides.items():
-        if k not in TIGHTEN_ONLY:
+        if k in PREFERENCE:
+            d[k] = v
+        elif k in TIGHTEN_ONLY:
+            cur = d.get(k)
+            d[k] = v if cur is None else TIGHTEN_ONLY[k](cur, v)
+        else:
             raise ValueError(f"risk override {k} not allowed live")
-        cur = d.get(k)
-        d[k] = v if cur is None else TIGHTEN_ONLY[k](cur, v)
     return RiskSpec(**d)
 
 
@@ -106,7 +116,12 @@ class LiveRunner:
         if cfg.symbols and self.spec.universe.kind != "fixed":
             log.warning("model trained on a dynamic universe; live trading restricted to %s", cfg.symbols)
         self.trade_symbols = set(cfg.symbols) if cfg.symbols else None
-        self.risk = tighten(self.spec.risk, cfg.risk_overrides)
+        self.risk = tighten(self.spec.risk, {**cfg.risk_overrides, "exchange_leverage": cfg.exchange_leverage})
+        # RISK-06: disaster thresholds were calibrated at the harness eval vol target; scale to live exposure
+        d = self.manifest.get("disaster") or {}
+        k = (self.risk.vol_target or d.get("eval_vol_target") or 1.0) / (d.get("eval_vol_target") or 1.0)
+        self.disaster = {"day_loss": d["day_loss"] * k if d.get("day_loss") else None,
+                         "max_dd": min(d["max_dd"] * k, 0.95) if d.get("max_dd") else None}
         self.costs = harness_config().costs
         self.step = interval_ms(self.manifest["interval"])
         self.alert = Alerter(os.environ.get(cfg.alert_webhook_env))
@@ -117,7 +132,9 @@ class LiveRunner:
         self.builder: TargetBuilder | None = None
         self.broker = None
         self.last_bar = 0
+        self.stale_bars = 0
         self.boundary_qty: dict[str, float] = {}
+        self.tag = "r" + self.manifest["run_id"][-6:]
 
     # ------------------------------------------------------------------ setup
     async def setup(self) -> None:
@@ -133,7 +150,7 @@ class LiveRunner:
             self.exec_client = BinanceFutures(env, os.environ.get(cfg.api_key_env), os.environ.get(cfg.api_secret_env),
                                               os.environ.get(cfg.ed25519_key_path_env))
             info = self.feed.exchange_info if env == "mainnet" else await self.exec_client.exchange_info()
-            self.broker = BinanceBroker(self.exec_client, parse_rules(info), cfg.leverage, self.costs.taker_fee_bps)
+            self.broker = BinanceBroker(self.exec_client, parse_rules(info), cfg.exchange_leverage, self.costs.taker_fee_bps)
             await self.broker.prepare()
         self._build_books(self.feed.symbols)
         st = self._load_state()
@@ -143,6 +160,8 @@ class LiveRunner:
             self.builder.prev = np.array([prev.get(s, 0.0) for s in self.feed.symbols])
             self.last_bar = st.get("last_bar", 0)
             self.boundary_qty = st.get("boundary_qty", {})
+            if st.get("peak_equity") is not None:
+                self.peak_equity, self._day, self._day_start = st["peak_equity"], st["day"], st["day_start"]
             log.info(f"restored state: equity={self.port.equity:.2f} positions={int((self.port.qty != 0).sum())}")
         if extra and set(extra) - set(self.feed.symbols):
             await self.alert.send("orphans", f"held symbols no longer tradable: {sorted(set(extra) - set(self.feed.symbols))}")
@@ -156,6 +175,18 @@ class LiveRunner:
             prev = dict(zip(old_p.symbols, old_b.prev))
             self.builder.prev = np.array([prev.get(s, 0.0) for s in symbols])
 
+    def _delisting_soon(self) -> set[str]:
+        """Perpetuals get a real deliveryDate once a delisting is scheduled (default is year 2100)."""
+        horizon = now_ms() + self.cfg.delist_horizon_days * 86_400_000
+        out = set()
+        for s in self.feed.exchange_info.get("symbols", []):
+            dd = int(s.get("deliveryDate", 0) or 0)
+            if s.get("contractType") == "PERPETUAL" and 0 < dd < 4_000_000_000_000 and dd < horizon:
+                out.add(s["symbol"])
+            elif s.get("status") not in (None, "TRADING"):
+                out.add(s["symbol"])
+        return out
+
     # ------------------------------------------------------------------ state
     def _load_state(self) -> dict:
         p = self.state_dir / "state.json"
@@ -164,6 +195,8 @@ class LiveRunner:
     def _save_state(self) -> None:
         st = {"portfolio": self.port.state_dict(), "builder_prev": dict(zip(self.port.symbols, self.builder.prev.tolist())),
               "last_bar": self.last_bar, "boundary_qty": self.boundary_qty, "saved": now_ms(),
+              "peak_equity": getattr(self, "peak_equity", None), "day": getattr(self, "_day", None),
+              "day_start": getattr(self, "_day_start", None),
               "model": self.manifest["run_id"]}
         tmp = self.state_dir / "state.json.tmp"
         tmp.write_text(json.dumps(st))
@@ -185,6 +218,11 @@ class LiveRunner:
         close = np.asarray(win["close"][-1], dtype=np.float64)
         prev_close = np.asarray(win["close"][-2], dtype=np.float64)
         fresh_frac = float(np.isfinite(close).mean())
+        coverage = 1.0
+
+        adv_all, dvol_all = market_context(win)
+        adv, dvol = adv_all[-1], dvol_all[-1]
+        bar_no = int(bar_open // self.step)
 
         # exchange is the source of truth for positions and equity
         exch_equity = None
@@ -196,47 +234,113 @@ class LiveRunner:
                     q[sym_idx[s]] = a
                 else:
                     await self.alert.send(f"orphan-{s}", f"exchange position in untracked symbol {s}: {a}")
+            # positions that vanished on the exchange were closed by the protective stop
+            for i in np.flatnonzero((self.port.qty != 0) & (q == 0)):
+                px = self.port.hard_stop_px[i] if np.isfinite(self.port.hard_stop_px[i]) else close[i]
+                self.port._mark_one(int(i), float(px))
+                self.port.fill(int(i), -float(self.port.qty[i]), float(px), float(adv[i]), float(dvol[i]), now_ms(), "hard_stop")
+                self.port.cooldown_until[i] = bar_no + self.risk.cooldown_bars
+                await self.alert.send(f"stop-{win.symbols[i]}", f"hard stop filled on exchange: {win.symbols[i]}", 0)
             drift = np.flatnonzero(np.abs(q - self.port.qty) > 1e-9)
             if len(drift):
                 log.warning(f"position drift vs local book on {[win.symbols[i] for i in drift]} -> adopting exchange")
             self.port.qty = q
         else:
-            # paper: settle funding printed at this bar's open on the book held across that boundary
+            # paper: settle funding printed at this bar's open on the book held across that boundary,
+            # then replay intrabar hard stops on the bar that just closed (same rule as the backtest)
             fr = np.asarray(win["funding_rate"][-1], dtype=np.float64)
             if np.isfinite(fr).any() and self.boundary_qty:
                 held = self.port.qty.copy()
                 self.port.qty = np.array([self.boundary_qty.get(s, 0.0) for s in win.symbols])
                 self.port.apply_funding(fr, np.asarray(win["open"][-1], dtype=np.float64))
                 self.port.qty = held
+            hit = self.port.check_hard_stops(bar_open, bar_no, np.asarray(win["open"][-1]), np.asarray(win["high"][-1]),
+                                             np.asarray(win["low"][-1]), adv_all[-2], dvol_all[-2])
+            for i in hit:
+                await self.alert.send(f"stop-{win.symbols[i]}", f"hard stop (paper): {win.symbols[i]}", 0)
 
         self.port.mark_to(close)
         if exch_equity is not None:
             self.port.cash = exch_equity
+        equity_close = self.port.equity
         self.port.record_book_return(close / prev_close - 1)
 
-        uni = compute_universe(win, self.spec.universe)[-1]
-        cols = build_last(win, self.spec.features, uni)
+        entry_m, hold_m = universe_masks(win, self.spec.universe)
+        uni, hold = entry_m[-1].copy(), hold_m[-1]
+        cols = build_last(win, self.spec.features, hold)
         names = self.spec.features.columns()
-        idx = np.flatnonzero(uni)
+        idx = np.flatnonzero(hold)
         X = np.column_stack([cols[c][idx] for c in names]).astype(np.float32) if len(idx) else np.zeros((0, len(names)), np.float32)
         score = np.full(S, np.nan)
         if len(idx):
             score[idx] = self.model.predict(X)
-        adv, dvol = (a[-1] for a in market_context(win))
-        bar_no = int(bar_open // self.step)
 
-        w = self.builder.step(bar_no, score, uni, dvol)
+        w = self.builder.step(bar_no, score, uni, dvol, hold)
         if self.trade_symbols is not None:
             w = np.where([s in self.trade_symbols for s in win.symbols], w, 0.0)
-        kill = (self.state_dir / "KILL").exists()
-        degraded = fresh_frac < 1 - self.cfg.max_missing_frac
+
+        # RISK-04 operational guards: they only ever remove the right to open/add
+        guards = []
+        prev_hold = hold_m[-2]
+        coverage = float(np.isfinite(close[prev_hold]).mean()) if prev_hold.any() else 1.0
+        self.stale_bars = self.stale_bars + 1 if coverage < self.cfg.min_coverage else 0
+        if coverage < self.cfg.min_coverage:
+            guards.append(f"coverage {coverage:.1%}")
+        delisting = self._delisting_soon()
+        black = set(getattr(self.broker, "blacklist", set())) | delisting
+        if black:
+            uni &= np.array([s not in black for s in win.symbols])
+            w = np.where([s in delisting for s in win.symbols], 0.0, w)
+        rej = self.broker.reject_rate() if hasattr(self.broker, "reject_rate") else 0.0
+        if rej > self.cfg.max_reject_rate:
+            guards.append(f"reject rate {rej:.0%}")
+        manual_halt = (self.state_dir / "HALT").exists()
+        if manual_halt:
+            guards.append("HALT file")
+        if guards:
+            uni[:] = False
+            await self.alert.send("guards", f"bar {ms_to_str(bar_open)}: no new risk ({'; '.join(guards)})")
+
+        # RISK-06 disaster halt: flatten, then wait for a human (remove the HALT file to resume)
+        E = self.port.equity
+        # while halted the reference re-arms, so resuming after review does not instantly re-trigger
+        self.peak_equity = E if manual_halt else max(getattr(self, "peak_equity", E), E)
+        day = bar_open // 86_400_000
+        if getattr(self, "_day", None) != day:
+            self._day, self._day_start = day, E
+        disaster = []
+        if self.disaster["day_loss"] and E < self._day_start * (1 - self.disaster["day_loss"]):
+            disaster.append(f"day loss {1 - E / self._day_start:.1%} > {self.disaster['day_loss']:.1%}")
+        if self.disaster["max_dd"] and E < self.peak_equity * (1 - self.disaster["max_dd"]):
+            disaster.append(f"drawdown {1 - E / self.peak_equity:.1%} > {self.disaster['max_dd']:.1%}")
+        if disaster and not manual_halt:
+            (self.state_dir / "HALT").write_text(f"halted_manual at {ms_to_str(bar_open)}: {'; '.join(disaster)}\n")
+            await self.alert.send("disaster", f"DISASTER HALT ({'; '.join(disaster)}): book flattened, manual review needed", 0)
+
+        # RISK-05 margin ratio (exchange truth): de-risk proportionally when maintenance margin gets close
+        margin_scale = 1.0
+        if exch_equity is not None and getattr(self.broker, "margin_ratio", None) is not None:
+            mr = self.broker.margin_ratio
+            if mr > self.cfg.margin_ratio_max:
+                margin_scale = self.cfg.margin_ratio_max / mr
+                await self.alert.send("margin", f"margin ratio {mr:.0%} > {self.cfg.margin_ratio_max:.0%}: scaling book x{margin_scale:.2f}")
+
+        kill = (self.state_dir / "KILL").exists() or bool(disaster)
+        halts_before = self.port.halt_events
         if kill:
             q_target = np.zeros(S)
-        elif degraded:
-            q_target = self.port.qty.copy()
-            await self.alert.send("stale", f"only {fresh_frac:.0%} symbols have bar {ms_to_str(bar_open)}; holding")
         else:
-            q_target = self.port.target_qty(bar_open + self.step, bar_no, w, close, adv, dvol)
+            q_target = self.port.target_qty(bar_open + self.step, bar_no, w, close, adv, dvol, uni)
+            if manual_halt:
+                q_target = np.where(np.sign(q_target) == np.sign(self.port.qty),
+                                    np.sign(self.port.qty) * np.minimum(np.abs(q_target), np.abs(self.port.qty)), 0.0)
+            if margin_scale < 1.0:
+                q_target = np.where(np.sign(q_target) == np.sign(self.port.qty),
+                                    np.sign(self.port.qty) * np.minimum(np.abs(q_target), np.abs(self.port.qty) * margin_scale), 0.0)
+        if self.port.halt_events > halts_before:
+            # DEC-07: a drawdown halt in live waits for a human; remove the HALT file to resume
+            (self.state_dir / "HALT").write_text(f"drawdown halt at {ms_to_str(bar_open)} equity={self.port.equity:.2f}\n")
+            await self.alert.send("dd-halt", f"drawdown halt: book flattened, waiting for manual review (rm {self.state_dir}/HALT)", 0)
         q_target = np.where(np.isfinite(close), q_target, self.port.qty)   # never trade blind
 
         dq = q_target - self.port.qty
@@ -244,8 +348,8 @@ class LiveRunner:
         ref = await self.data_client.ticker_price() if orders else {}
         self.boundary_qty = {s: float(a) for s, a in zip(win.symbols, self.port.qty) if a != 0}
         current = {s: float(a) for s, a in zip(win.symbols, self.port.qty) if a != 0}
-        fills = await (self.broker.execute(orders, ref, bar_no, current) if self.broker.kind == "binance"
-                       else self.broker.execute(orders, ref, bar_no))
+        deadline = (bar_open + self.step) / 1000 + self.cfg.open_deadline_s
+        fills = await self.broker.execute(orders, ref, bar_no, current, tag=self.tag, open_deadline=deadline)
 
         # book fills through the shared accounting (paper: authoritative; live: re-synced next bar)
         new_q = self.port.qty.copy()
@@ -256,14 +360,19 @@ class LiveRunner:
             if math.isfinite(f.price):
                 px[i] = f.price
         self.port.mark_to(px)
-        self.port.rebalance(new_q, px, adv, dvol, now_ms())
+        self.port.rebalance(new_q, px, adv, dvol, bar_open + self.step)
+        held = np.flatnonzero(self.port.qty != 0)
+        await self.broker.sync_stops({win.symbols[i]: (int(np.sign(self.port.qty[i])), float(self.port.hard_stop_px[i]))
+                                      for i in held if np.isfinite(self.port.hard_stop_px[i])})
+        self.feed.extra = {win.symbols[i] for i in held}
         failed = [f for f in fills if f.status not in ("FILLED", "NEW", "PARTIALLY_FILLED")]
         if failed:
             await self.alert.send("fills", f"{len(failed)} orders failed: {[(f.symbol, f.status) for f in failed][:5]}")
 
         self.last_bar = bar_open
         self._save_state()
-        dec = pd.DataFrame({"symbol": [win.symbols[i] for i in idx], "score": score[idx], "w": w[idx]})
+        dec = pd.DataFrame({"symbol": [win.symbols[i] for i in idx], "entry": uni[idx], "score": score[idx], "w": w[idx],
+                            "q_target": q_target[idx]})
         for c in names:
             dec[c] = cols[c][idx]
         dec.insert(0, "bar_open", bar_open)
@@ -273,8 +382,11 @@ class LiveRunner:
         dec.to_parquet(p, index=False)
         rec = {
             "bar_open": bar_open, "bar": ms_to_str(bar_open), "mode": self.cfg.mode, "equity": self.port.equity,
+            "equity_close": equity_close,
             "exchange_equity": exch_equity, "gross": float(np.abs(self.port.notional()).sum() / max(self.port.equity, 1e-9)),
-            "n_universe": int(uni.sum()), "fresh_frac": fresh_frac, "missing": missing[:20], "kill": kill,
+            "n_universe": int(uni.sum()), "fresh_frac": fresh_frac, "coverage": coverage, "guards": guards,
+            "disaster": disaster, "margin_scale": margin_scale,
+            "missing": missing[:20], "kill": kill,
             "halted": self.port.halt_until_ms > now_ms() or self.port.day_halted, "vol_scale": self.port.vol_scale(),
             "orders": orders, "fills": [f.__dict__ | {"slippage_bps": f.slippage_bps} for f in fills],
             "latency_s": round(time.time() - t0, 2),

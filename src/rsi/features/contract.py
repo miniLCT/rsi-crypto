@@ -54,8 +54,27 @@ def check_feature(panel: Panel, name: str, n_cuts: int = 4, future: int = 200, s
         res["lookback_ok"] &= ok_l
         res["detail"].append({"cut": int(c), "causal_err": w_c, "lookback_err": w_l,
                               "coverage": float(np.isfinite(ref).mean())})
-    res["passed"] = res["causal"] and res["lookback_ok"]
+    res["unit_invariant"], res["unit_err"] = check_unit_invariance(panel, name)
+    res["passed"] = res["causal"] and res["lookback_ok"] and res["unit_invariant"]
     return res
+
+
+def rescale_units(panel: Panel, price_mult: float = 1000.0) -> Panel:
+    """Same market quoted in a different contract unit (e.g. PEPE vs 1000PEPE): prices x k, base volume / k."""
+    data = dict(panel.data)
+    for f in ("open", "high", "low", "close"):
+        data[f] = np.asarray(panel[f]) * price_mult
+    data["volume"] = np.asarray(panel["volume"]) / price_mult
+    return Panel(panel.times, panel.symbols, data, panel.interval, {"source": f"rescaled-{panel.fingerprint}"})
+
+
+def check_unit_invariance(panel: Panel, name: str, bars: int = 3000) -> tuple[bool, float]:
+    """FEAT-03: a cross-sectionally comparable feature must not depend on the contract's quoting unit."""
+    feat = registry.get(name)
+    sub = panel.slice(max(0, panel.T - max(bars, 3 * feat.lookback)), panel.T)
+    a = feat.compute(FrameView(sub))
+    b = feat.compute(FrameView(rescale_units(sub)))
+    return _close(a, b)
 
 
 def _store_path():
@@ -86,11 +105,12 @@ def ensure_contract(panel: Panel, names: list[str], symbols_sample: int = 24) ->
     failed = []
     for n in todo:
         r = check_feature(sub, n)
-        store[n] = {k: r[k] for k in ("src_hash", "lookback", "causal", "lookback_ok", "passed")}
+        store[n] = {k: r[k] for k in ("src_hash", "lookback", "causal", "lookback_ok", "unit_invariant", "passed")}
         if not r["passed"]:
             failed.append(r)
     _store_path().write_text(json.dumps(store, indent=1, sort_keys=True))
     if failed:
-        msg = "; ".join(f"{r['name']}: causal={r['causal']} lookback_ok={r['lookback_ok']} {r['detail']}" for r in failed)
+        msg = "; ".join(f"{r['name']}: causal={r['causal']} lookback_ok={r['lookback_ok']} "
+                        f"unit_invariant={r['unit_invariant']} {r['detail']}" for r in failed)
         raise ValueError(f"feature contract violated -> {msg}")
     log.info(f"contract passed for {len(todo)} new/changed features")

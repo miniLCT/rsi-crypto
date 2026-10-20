@@ -32,6 +32,10 @@ class SymbolFilter(BaseModel):
     underlying_types: list[str] = Field(default_factory=lambda: ["COIN"])
 
 
+class QualityCfg(BaseModel):
+    min_window_coverage: float = 0.95
+
+
 class DownloadCfg(BaseModel):
     concurrency: int = 32
     verify_checksum: bool = True
@@ -45,6 +49,7 @@ class DataConfig(BaseModel):
     start_month: str = "2020-01"
     datasets: list[str] = Field(default_factory=lambda: ["klines", "fundingRate", "premiumIndexKlines"])
     symbol_filter: SymbolFilter = Field(default_factory=SymbolFilter)
+    quality: QualityCfg = Field(default_factory=QualityCfg)
     download: DownloadCfg = Field(default_factory=DownloadCfg)
 
     @property
@@ -86,13 +91,24 @@ class CostCfg(BaseModel):
     max_half_spread_bps: float = 30.0
     impact_eta: float = 0.5
     delist_penalty_bps: float = 200.0
+    liquidation_fee_bps: float = 100.0
 
 
 class CapitalCfg(BaseModel):
     initial_usd: float = 10000.0
 
 
+class DisasterCfg(BaseModel):
+    """RISK-06: block-bootstrap calibration of the live disaster halt."""
+    block_bars: int = 48
+    n_boot: int = 2000
+    tail: float = 0.01
+    worst_day_mult: float = 1.5
+    day_vol_mult: float = 4.0
+
+
 class GateCfg(BaseModel):
+    eval_vol_target: float = 0.30     # RISK-05/T4.8: every gated backtest runs at this vol target
     min_sharpe: float = 1.0
     min_dsr: float = 0.9
     max_drawdown: float = 0.3
@@ -113,6 +129,7 @@ class HarnessConfig(BaseModel):
     costs: CostCfg = Field(default_factory=CostCfg)
     capital: CapitalCfg = Field(default_factory=CapitalCfg)
     gates: GateCfg = Field(default_factory=GateCfg)
+    disaster: DisasterCfg = Field(default_factory=DisasterCfg)
 
 
 @lru_cache
@@ -123,6 +140,14 @@ def data_config(path: str | None = None) -> DataConfig:
 @lru_cache
 def harness_config(path: str | None = None) -> HarnessConfig:
     return HarnessConfig(**load_yaml(path or repo_root() / "configs" / "harness.yaml"))
+
+
+def harness_hash(path: str | None = None) -> str:
+    """Content hash of the parsed evaluation contract (formatting/comments do not matter)."""
+    import hashlib
+    import json
+    d = load_yaml(path or repo_root() / "configs" / "harness.yaml")
+    return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def runs_dir() -> Path:

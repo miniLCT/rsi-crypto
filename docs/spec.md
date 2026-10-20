@@ -75,8 +75,9 @@
 | DEC-03 | "算特征的币"与"交易的币"分离：全市场指标可用全部币计算，交易只在 DEC-02 币池内 | 已确认 |
 | DEC-04 | v1 下单全部用市价单（吃单），与成本模型一致 | 默认 |
 | DEC-05 | 默认不设固定止盈；移动止盈作为实验参数 | 默认 |
-| DEC-06 | 总杠杆 1 倍；交易所端硬止损 3 倍持仓周期波动 | 默认（待确认） |
-| DEC-07 | 当日亏损 3% 全平停到次日；回撤 15% 杠杆减半，25% 停机等待人工 | 默认（待确认） |
+| DEC-06 | 杠杆可配置，1–10 倍，硬上限 10 倍。区分两个参数：交易所杠杆（每个币的保证金倍数）和组合总敞口（`Σ\|名义\| / 权益`）。实际敞口由波动率目标决定，杠杆参数只是上限。详见 RISK-05 | 已确认 |
+| DEC-07 | 回撤水平靠波动率目标（仓位大小）控制，不靠止损。灾难停机阈值按样本外收益的分块自助抽样分布标定（单日亏损、回撤都取 1% 尾部），触发后停机，人工复核后才能恢复。按盈亏机械止损、回撤降杠杆默认关闭，只作为实验参数 | 已确认 |
+| DEC-09 | 持仓止损只设宽的硬止损（4–5 倍持仓周期波动），空头必须设；日常出场靠信号退出 | 已确认 |
 | DEC-08 | 历史数据：2020-01 起；研究期 2020-07-01 至 2025-10-01；holdout 2025-10-01 至 2026-10-01 | 已确认 |
 
 ---
@@ -313,15 +314,39 @@ data.binance.vision ─► raw zip ─► lake parquet ─► Panel[T,S]
 - 规则:
   - 软止损：收盘浮亏超过 `stop_loss_vol` 倍日波动时，下一根 bar 开盘平仓。（已实现）
   - 止损后冷却 `cooldown_bars` 根 bar，冷却期内同币不开仓。（已实现）
-  - 硬止损：开仓后在交易所挂 STOP_MARKET（reduceOnly）；回测用 bar 的 high/low 判断是否触发，成交价取止损价与开盘价中较差者，再加滑点。（todo）
+  - 硬止损（DEC-09）：距离为 4–5 倍持仓周期波动，空头必须设。开仓后在交易所挂 STOP_MARKET（reduceOnly）；回测用 bar 的 high/low 判断是否触发，成交价取止损价与开盘价中较差者，再加滑点。（todo）
   - 移动止盈（可选）：浮盈超过 x 倍波动后启动，回撤 y 倍波动平仓；同一 bar 内止损与止盈都被触及时，先按止损处理。（todo）
   - 持仓时间上限 `max_hold_bars`。（todo）
-- gap: 当前默认 `stop_loss_vol=4.0`，与 DEC-06 不一致，待确认后统一。
+- gap: 当前的 `stop_loss_vol=4.0` 以日波动为单位、在收盘时检查（软止损），需改为 DEC-09 的硬止损语义。
 
 ### RISK-03 组合级熔断
 - status: partial
 - 规则: 波动率目标（`vol_target`，按 `vol_lookback` 实际波动缩放，限制在 `[vol_scale_min, vol_scale_max]`）；当日亏损达到 `daily_loss_halt` 全平，停到下一个 UTC 日；回撤达到 `dd_halt` 全平，停 `dd_halt_bars` 根 bar。
-- gap: DEC-07 的两级回撤（15% 降杠杆、25% 停机）尚未实现；当前默认 `daily_loss_halt=0.06`、`dd_halt=0.25`。
+- 按 DEC-07：`daily_loss_halt`、`dd_halt` 这类按盈亏的熔断默认关闭（`null`），只作为实验参数；实盘的灾难停机由 RISK-06 标定。
+- gap: 当前默认 `daily_loss_halt=0.06`、`dd_halt=0.25`（开启状态），需改为默认关闭。
+
+### RISK-05 杠杆与保证金
+- status: partial
+- module: `engine/portfolio.py`（`RiskSpec`）、`strategy.py`（`StrategySpec.gross`）、`live/broker.py`、`configs/live/*.yaml`
+- 两个参数，含义不同：
+  - **交易所杠杆** `exchange_leverage`（实盘配置，1–10，默认 3）：每个币的初始保证金倍数，决定能开多大仓位、占用多少保证金。实际值 = min(配置值, 该币在目标名义金额下的杠杆档位上限)（`/fapi/v1/leverageBracket`）。
+  - **组合总敞口** `gross`（策略）和 `max_gross`（风控上限，1–10）：`Σ|名义金额| / 权益`，决定真实风险。实际敞口 = min(`max_gross`, 波动率目标推导出的敞口)。
+- 约束：
+  - `max_gross ≤ 10`，`exchange_leverage ≤ 10`，配置超出时拒绝加载。
+  - 保证金占用 `Σ|名义| / exchange_leverage ≤ margin_usage_max × 权益`（默认 0.6），否则按比例缩仓。
+  - 实盘每根 bar 检查保证金率（维持保证金 / 保证金余额）；超过 `margin_ratio_max`（默认 0.3）时按比例减仓；单向持仓、全仓保证金。
+- 回测：模拟保证金与强平。权益低于维持保证金时，按当时价格强平全部持仓，并扣强平手续费；强平计为严重事件，写入指标。
+- 评估：门槛中的 Sharpe 基本不受敞口影响，但回撤会随敞口线性放大。为防止通过调低敞口"刷"门槛，门槛统一在固定波动率目标（harness 配置）下评估；实盘的敞口选择是风险偏好，不属于 alpha。
+- gap: 上限校验、保证金占用约束、保证金率检查、杠杆档位、回测强平模拟尚未实现；实盘配置目前写死 `leverage: 3`。
+
+### RISK-06 灾难阈值标定
+- status: todo
+- module: `harness/release.export`（写入 manifest），实盘读取
+- 规则：对研究期 OOS 逐 bar 收益做分块自助抽样（block bootstrap，块长 1 天），得出正常运行时的单日亏损和回撤分布：
+  - 单日亏损停机阈值 = max(1.5 × 回测最差单日, 4 × 日波动, 自助抽样 1% 尾部)
+  - 回撤停机阈值 = 自助抽样最大回撤的 99% 分位
+  - 阈值按实盘的实际敞口与回测敞口之比线性缩放。
+- acceptance: 阈值写入 manifest；触发后状态变为 `halted_manual`，不会自动恢复；回测中触发次数作为指标输出（正常策略应接近 0）。
 
 ### RISK-04 运维风控（实盘）
 - status: todo
@@ -409,6 +434,7 @@ data.binance.vision ─► raw zip ─► lake parquet ─► Panel[T,S]
   pass     : sharpe >= 1.0, dsr >= 0.90, max_dd <= 30%, 正收益折 >= 60%（≥20 天的折）, n_trades >= 200
   champion : pass，且 sharpe - 冠军 sharpe >= 0.15，且回撤不显著变差
   holdout  : holdout sharpe >= max(0.3, 0.4 * 研究期 sharpe)，且 holdout max_dd <= 30%
+  注       : 回撤类门槛统一在 harness 规定的固定波动率目标下评估（RISK-05），避免靠调低敞口过门槛
   paper    : 模拟盘 >= 14 天，实际成本与模型偏差 <= 30%，parity 通过
   live     : 小资金上线；逐级放大需人工批准
   ```

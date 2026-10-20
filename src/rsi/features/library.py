@@ -164,7 +164,7 @@ for _n in (1, 4, 16, 48):
     register_partial(f"vol_surge_{_n}", _qv_ratio, lookback=336, group="flow", doc="quote volume vs 7d mean", n=_n, base=336)
 
 
-@register("log_adv_30d", lookback=1440, group="flow", doc="log average daily quote volume (size proxy)")
+@register("log_adv_30d", lookback=1440, group="size", doc="log ADV; size/capacity/neutralisation only, not a signal")
 def _log_adv(fv: FrameView) -> pd.DataFrame:
     return _safe_log(fv.quote_volume.rolling(1440, min_periods=1440).mean() * 48)
 
@@ -175,8 +175,17 @@ def _taker_imb(fv: FrameView, n: int) -> pd.DataFrame:
     return (2 * tb - qv) / qv.where(qv > 0)
 
 
-for _n in (1, 4, 16, 48, 336):
+for _n in (1, 4, 16, 48):
     register_partial(f"taker_imb_{_n}", _taker_imb, lookback=_n, group="flow", doc="taker buy-sell imbalance", n=_n)
+
+
+def _taker_imb_rel(fv: FrameView, n: int) -> pd.DataFrame:
+    return _taker_imb(fv, n) - _taker_imb(fv, 336)
+
+
+for _n in (4, 16):
+    register_partial(f"taker_imb_rel_{_n}", _taker_imb_rel, lookback=336, group="flow",
+                     doc="taker imbalance relative to own 7d level", n=_n)
 
 
 @register("taker_imb_shift", lookback=336, group="flow", doc="1d taker imbalance minus 7d")
@@ -192,10 +201,14 @@ def _trade_size(fv: FrameView) -> pd.DataFrame:
     return _safe_log(s48 / s336)
 
 
-@register("amihud_48", lookback=49, group="flow", doc="log Amihud illiquidity over 1d")
-def _amihud(fv: FrameView) -> pd.DataFrame:
-    ill = fv.logret.abs() / fv.quote_volume.where(fv.quote_volume > 0)
-    return _safe_log(ill.rolling(48, min_periods=24).mean() * 1e9)
+def _illiq(fv: FrameView) -> pd.DataFrame:
+    return fv.memo("_illiq", lambda: fv.logret.abs() / fv.quote_volume.where(fv.quote_volume > 0))
+
+
+@register("amihud_rel", lookback=337, group="flow", doc="1d Amihud illiquidity relative to own 7d level (log)")
+def _amihud_rel(fv: FrameView) -> pd.DataFrame:
+    ill = _illiq(fv)
+    return _safe_log(ill.rolling(48, min_periods=24).mean() / ill.rolling(336, min_periods=168).mean())
 
 
 def _vwap_gap(fv: FrameView, n: int) -> pd.DataFrame:
@@ -240,28 +253,36 @@ def _body_ratio(fv: FrameView) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- perp specific: funding & basis
-def _funding_8h(fv: FrameView) -> pd.DataFrame:
+def _funding_1h(fv: FrameView) -> pd.DataFrame:
+    """Last settled funding expressed per hour (CONV-03), so 1h/4h/8h settlement schedules are comparable."""
     def f():
         fr = fv.funding_rate.ffill(limit=47)
         ih = fv.funding_interval_h.ffill(limit=47)
-        return fr * 8.0 / ih
-    return fv.memo("_funding_8h", f)
+        return fr / ih
+    return fv.memo("_funding_1h", f)
 
 
-@register("funding_last", lookback=48, group="carry", doc="last settled funding, 8h-equivalent")
+@register("funding_last", lookback=48, group="carry", doc="last settled funding, per hour")
 def _funding_last(fv: FrameView) -> pd.DataFrame:
-    return _funding_8h(fv)
+    return _funding_1h(fv)
 
 
-@register("funding_avg_7d", lookback=48 + 336, group="carry", doc="mean settled funding over 7d")
+@register("funding_avg_7d", lookback=48 + 336, group="carry", doc="mean settled hourly funding over 7d")
 def _funding_avg(fv: FrameView) -> pd.DataFrame:
-    return _funding_8h(fv).rolling(336, min_periods=48).mean()
+    return _funding_1h(fv).rolling(336, min_periods=48).mean()
 
 
 @register("funding_chg_1d", lookback=48 + 49, group="carry")
 def _funding_chg(fv: FrameView) -> pd.DataFrame:
-    f = _funding_8h(fv)
+    f = _funding_1h(fv)
     return f - f.shift(48)
+
+
+@register("funding_z_7d", lookback=48 + 336, group="carry", doc="funding now vs own 7d distribution")
+def _funding_z(fv: FrameView) -> pd.DataFrame:
+    f = _funding_1h(fv)
+    sd = f.rolling(336, min_periods=48).std()
+    return (f - f.rolling(336, min_periods=48).mean()) / sd.where(sd > 0)
 
 
 def _prem(fv: FrameView, n: int) -> pd.DataFrame:

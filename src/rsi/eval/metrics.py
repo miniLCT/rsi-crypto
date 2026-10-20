@@ -68,9 +68,9 @@ def summarize(res, bars_per_year: int, n_trials: int = 1, trial_sr_var: float | 
     tr = res.trades
     avg_eq = float(np.mean(res.equity)) if len(res.equity) else res.equity0
     out = {
-        "sharpe": sharpe(dr.to_numpy(), 365),
-        "sharpe_bar": sharpe(r, bars_per_year),
-        "sortino": _sortino(dr.to_numpy(), 365),
+        "sharpe": sharpe(r, bars_per_year),             # EVAL-01: per-bar returns, annualised
+        "sharpe_daily": sharpe(dr.to_numpy(), 365),
+        "sortino": _sortino(r, bars_per_year),
         "cagr": float(cagr),
         "total_return": float(total),
         "max_drawdown": mdd,
@@ -78,7 +78,7 @@ def summarize(res, bars_per_year: int, n_trials: int = 1, trial_sr_var: float | 
         "vol_ann": float(np.std(dr) * math.sqrt(365)),
         "avg_gross": float(np.mean(res.gross)) if len(res.gross) else 0.0,
         "avg_net": float(np.mean(res.net)) if len(res.net) else 0.0,
-        "turnover_ann": float(res.turnover_usd / avg_eq / max(years, 1e-9)),
+        "turnover_ann": float(0.5 * res.turnover_usd / avg_eq / max(years, 1e-9)),   # one-sided
         "fees_frac": float(res.fees_usd / res.equity0),
         "funding_frac": float(res.funding_usd / res.equity0),
         "n_trades": int(len(tr)),

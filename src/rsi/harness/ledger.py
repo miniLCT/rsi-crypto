@@ -13,7 +13,7 @@ from rsi.config import runs_dir
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
-  run_id TEXT PRIMARY KEY, created REAL, name TEXT, parent TEXT, harness_version INTEGER,
+  run_id TEXT PRIMARY KEY, created REAL, name TEXT, parent TEXT, harness_version INTEGER, harness_hash TEXT,
   spec_hash TEXT, spec_json TEXT, git_sha TEXT, data_fp TEXT, status TEXT,
   sharpe REAL, dsr REAL, max_dd REAL, daily_sr REAL, metrics_json TEXT, hypothesis TEXT, note TEXT
 );
@@ -44,7 +44,7 @@ class Ledger:
 
     # ------------------------------------------------------------------ runs
     def add_run(self, row: dict) -> None:
-        cols = ["run_id", "created", "name", "parent", "harness_version", "spec_hash", "spec_json", "git_sha", "data_fp",
+        cols = ["run_id", "created", "name", "parent", "harness_version", "harness_hash", "spec_hash", "spec_json", "git_sha", "data_fp",
                 "status", "sharpe", "dsr", "max_dd", "daily_sr", "metrics_json", "hypothesis", "note"]
         row = {**{c: None for c in cols}, **row, "created": row.get("created", time.time())}
         with self._conn() as c:
@@ -83,6 +83,15 @@ class Ledger:
     def set_status(self, run_id: str, status: str, note: str | None = None) -> None:
         with self._conn() as c:
             c.execute("UPDATE runs SET status = ?, note = COALESCE(?, note) WHERE run_id = ?", (status, note, run_id))
+
+    def check_harness(self, version: int, content_hash: str) -> None:
+        """CONV-04: the evaluation contract may not change without a version bump."""
+        with self._conn() as c:
+            rows = c.execute("SELECT DISTINCT harness_hash FROM runs WHERE harness_version = ?", (version,)).fetchall()
+        other = {r[0] for r in rows if r[0] and r[0] != content_hash}
+        if other:
+            raise RuntimeError(f"configs/harness.yaml changed but version is still {version} "
+                               f"(ledger has {sorted(other)}, now {content_hash}); bump `version`")
 
     # ------------------------------------------------------------------ champion
     def champion(self, harness_version: int, stage: str = "research") -> dict | None:

@@ -3,7 +3,7 @@
 mode: testnet
 model_dir: models/CHANGE_ME
 state_dir: live_state/testnet
-leverage: 3
+exchange_leverage: 3                # 1-10, capped per symbol by leverage brackets
 symbols: null
-risk_overrides: {max_gross: 1.5}
+risk_overrides: {}                  # e.g. {vol_target: 0.2, max_gross: 2.0}
 exec_delay_s: 4
