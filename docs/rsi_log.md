@@ -182,3 +182,14 @@ Auto-generated entries per run (HRN-08); add a `- conclusion:` line under each.
 - Neighbour s11.7 (sharpe 1.56, DD 24.7%) is also strong -> the gain sits in a region (longer horizon + wide buffer), not a single lucky point.
 - Both legs now earn (long +262%, short +168% of capital gross); funding received +187%; fees -258% remain the largest cost.
 - Caveat: DSR barely clears 0.90 after 25 trials. Next step on the ladder is a budgeted holdout look (2025-10 .. 2026-09, includes the 2025-10-10 liquidation cascade).
+
+## Holdout look #1 (2026-10-20) — champion 20261020-203642-57357f: **FAIL**
+
+- Holdout 2025-10 .. 2026-09: sharpe 0.41 (need >= 0.73 = 0.4 x 1.82), max DD 38.1%, total +8.5%, turnover 81x.
+- Quarters: 2025Q4 -2.3% (sharpe 0.08, DD 22%), 2026Q1 -17.5% (sharpe -2.5), 2026Q2 +32.6% (sharpe 3.9), 2026Q3 +2.3%.
+- OOS IC fell from 0.032 (research) to 0.006; funding still received (+39% of capital), long leg -21%, short leg +23%.
+- Reading: the edge selected by search over 25 trials did not carry into the new regime; carry survived, the
+  cross-sectional return forecast mostly did not. The gate did its job (no promotion to paper on research results alone).
+- Rules from here: no tuning against the holdout (2 looks left in this 30-day window). Next research must target
+  robustness inside the research period: per-year IC stability of features, adaptive vs. long training windows,
+  ensembling the neighbouring good region instead of picking the single best point, and carry-only vs. carry+forecast blends.
