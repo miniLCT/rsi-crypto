@@ -158,6 +158,8 @@ class LiveRunner:
             self.port.load_state(st["portfolio"])
             prev = st.get("builder_prev", {})
             self.builder.prev = np.array([prev.get(s, 0.0) for s in self.feed.symbols])
+            self.builder.hist = [np.array([np.nan if h.get(s, 1e300) >= 1e300 else h[s] for s in self.feed.symbols])
+                                 for h in st.get("builder_hist", [])]
             self.last_bar = st.get("last_bar", 0)
             self.boundary_qty = st.get("boundary_qty", {})
             if st.get("peak_equity") is not None:
@@ -174,6 +176,7 @@ class LiveRunner:
             self.port.load_state(old_p.state_dict())
             prev = dict(zip(old_p.symbols, old_b.prev))
             self.builder.prev = np.array([prev.get(s, 0.0) for s in symbols])
+            self.builder.hist = [np.array([dict(zip(old_p.symbols, h)).get(s, np.nan) for s in symbols]) for h in old_b.hist]
 
     def _delisting_soon(self) -> set[str]:
         """Perpetuals get a real deliveryDate once a delisting is scheduled (default is year 2100)."""
@@ -194,6 +197,7 @@ class LiveRunner:
 
     def _save_state(self) -> None:
         st = {"portfolio": self.port.state_dict(), "builder_prev": dict(zip(self.port.symbols, self.builder.prev.tolist())),
+              "builder_hist": [dict(zip(self.port.symbols, np.nan_to_num(h, nan=1e300).tolist())) for h in self.builder.hist],
               "last_bar": self.last_bar, "boundary_qty": self.boundary_qty, "saved": now_ms(),
               "peak_equity": getattr(self, "peak_equity", None), "day": getattr(self, "_day", None),
               "day_start": getattr(self, "_day_start", None),

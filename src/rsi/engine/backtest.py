@@ -63,12 +63,18 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
                  costs: CostCfg, equity0: float, t0: int, t1: int, bars_per_year: int = 17520,
                  context: tuple[np.ndarray, np.ndarray] | None = None, hold: np.ndarray | None = None) -> BacktestResult:
     step = interval_ms(panel.interval)
-    T, S = panel.T, panel.S
+    T = panel.T
     t1 = min(t1, T)
-    o = np.asarray(panel["open"]); h = np.asarray(panel["high"]); lo = np.asarray(panel["low"]); c = np.asarray(panel["close"])
-    fr = np.asarray(panel["funding_rate"])
     adv, dvol = context if context is not None else market_context(panel)
-    port = Portfolio(panel.symbols, equity0, costs, risk, bars_per_year, step)
+    # only columns that can ever carry a position in [t0, t1) matter; dropping the rest is exact
+    active = (hold if hold is not None else mask)[t0:t1].any(axis=0) | mask[t0:t1].any(axis=0)
+    cols = np.flatnonzero(active)
+    symbols = [panel.symbols[j] for j in cols]
+    S = len(cols)
+    o, h, lo, c, fr = (np.asarray(panel[f])[:, cols] for f in ("open", "high", "low", "close", "funding_rate"))
+    adv, dvol, score, mask = adv[:, cols], dvol[:, cols], score[:, cols], mask[:, cols]
+    hold = hold[:, cols] if hold is not None else None
+    port = Portfolio(symbols, equity0, costs, risk, bars_per_year, step)
     builder = TargetBuilder(strat, S)
     n = t1 - t0
     eq = np.zeros(n); gross = np.zeros(n); net = np.zeros(n); nl = np.zeros(n, dtype=int); ns = np.zeros(n, dtype=int)

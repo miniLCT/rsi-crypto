@@ -15,3 +15,14 @@ logs/
 secrets/
 *.pem
 .env
+
+# trained artifacts and local state
+models/
+*.sqlite
+*.sqlite-journal
+
+# credentials (use environment variables, see README)
+.env*
+*.key
+*.p12
+id_*

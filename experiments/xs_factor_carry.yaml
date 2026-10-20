@@ -1,0 +1,16 @@
+name: xs_factor_carry_7d
+hypothesis: >
+  Funding carry: perps with persistently high funding are crowded longs. Shorting the highest 7d-average
+  funding names and buying the lowest collects funding and bets on crowding unwinding; the signal is
+  slow, so turnover (the main cost at 30m) should be low.
+universe: {kind: top_liquid, size: 100, keep_rank: 120}
+features: {include: [funding_avg_7d], transform: rank}
+label: {horizon: 48}
+model: {kind: factor, weights: {"r:funding_avg_7d": -1.0}}
+strategy: {kind: xs_longshort, rebalance_bars: 16, long_frac: 0.2, short_frac: 0.2, exit_buffer: 0.2}
+risk: {hold_horizon_bars: 48}
+search_space:
+  strategy.rebalance_bars: [8, 16, 48]
+  strategy.long_frac: [0.1, 0.2, 0.3]
+  strategy.exit_buffer: [0.1, 0.2, 0.3]
+  strategy.smooth_bars: [1, 8, 24]

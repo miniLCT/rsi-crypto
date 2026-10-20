@@ -70,6 +70,29 @@ def feat_list(selector: str = "all"):
     console.print(t)
 
 
+@feat_app.command("build")
+def feat_build(selectors: list[str] = typer.Argument(None), jobs: int = 3, research: bool = True):
+    """Precompute features into the cache in parallel (research panel by default)."""
+    from rsi.config import cache_dir
+    from rsi.features import engine, registry
+    from rsi.harness.runner import full_panel, research_panel
+    from rsi.harness.spec import ExperimentSpec
+    spec = ExperimentSpec(name="build")
+    full = full_panel(spec)
+    if research:
+        # materialise the research slice so workers can memory-map it
+        from rsi.data.panel import save_panel
+        p = research_panel(spec)
+        d = cache_dir() / "panel" / f"slice-{p.fingerprint}"
+        if not (d / "meta.json").exists():
+            save_panel(p, d)
+    else:
+        p, d = full, cache_dir() / "panel" / full.fingerprint
+    names = registry.resolve(selectors or ["all"]) + ["log_adv_30d"]
+    engine.build_parallel(str(d), p, names, jobs)
+    console.print(f"built {len(names)} features for panel {p.fingerprint}")
+
+
 @feat_app.command("check")
 def feat_check(selectors: list[str] = typer.Argument(None)):
     """Run the causality + lookback contract on features."""

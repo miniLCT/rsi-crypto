@@ -26,23 +26,61 @@ def _cache_path(panel: Panel, feat: registry.Feature) -> Path:
     return cache_dir() / "features" / panel.fingerprint / f"{feat.name}-{feat.src_hash}.npy"
 
 
+CHUNK = 120          # symbols per column chunk; time-series features are column-independent
+ANCHORS = ("BTCUSDT",)   # market-context features read these columns, so every chunk carries them
+
+
+def _compute_chunked(panel: Panel, names: list[str]) -> dict[str, np.ndarray]:
+    """Compute features chunk-by-chunk over symbols to bound memory; exact because features only
+    combine a symbol's own history with the anchor columns."""
+    if panel.S <= CHUNK:
+        fv = FrameView(panel)
+        return {n: registry.get(n).compute(fv).astype(DTYPE) for n in names}
+    out = {n: np.full((panel.T, panel.S), np.nan, dtype=DTYPE) for n in names}
+    anchors = [s for s in ANCHORS if s in panel.symbols]
+    close = np.asarray(panel["close"])
+    alive = np.isfinite(close)
+    first = np.where(alive.any(0), alive.argmax(0), panel.T)
+    others = sorted((j for j, s in enumerate(panel.symbols) if s not in anchors), key=lambda j: first[j])
+    L = max_lookback(names)
+    for k in range(0, len(others), CHUNK):
+        cols = others[k:k + CHUNK]
+        # rows before (earliest listing - lookback) cannot influence any value of this chunk
+        r0 = 0 if k == 0 else max(0, int(first[cols].min()) - L - 1)
+        syms = anchors + [panel.symbols[j] for j in cols]
+        sub = panel.slice(r0, panel.T).select_symbols(syms)
+        fv = FrameView(sub)
+        for n in names:
+            arr = registry.get(n).compute(fv).astype(DTYPE)
+            out[n][r0:, cols] = arr[:, len(anchors):]
+            if k == 0:
+                for a, s in enumerate(anchors):
+                    out[n][:, panel.symbols.index(s)] = arr[:, a]
+        del fv, sub
+    return out
+
+
 def compute_batch(panel: Panel, names: list[str], use_cache: bool = True) -> dict[str, np.ndarray]:
-    fv = FrameView(panel)
     out: dict[str, np.ndarray] = {}
-    computed = 0
+    todo = []
     for n in names:
-        feat = registry.get(n)
-        p = _cache_path(panel, feat)
+        p = _cache_path(panel, registry.get(n))
         if use_cache and p.exists():
             out[n] = np.load(p, mmap_mode="r")
-            continue
-        arr = feat.compute(fv).astype(DTYPE)
+        else:
+            todo.append(n)
+    computed = 0
+    for n in todo:
+        feat = registry.get(n)
+        p = _cache_path(panel, feat)
+        arr = _compute_chunked(panel, [n])[n]
         computed += 1
         if use_cache:
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp = p.with_suffix(".tmp.npy")
             np.save(tmp, arr)
             tmp.replace(p)
+            arr = np.load(p, mmap_mode="r")
         out[n] = arr
     if computed:
         log.info(f"computed {computed}/{len(names)} features (rest cached)")
@@ -72,16 +110,63 @@ def _coverage_ok(v: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return (n_val >= MIN_XS_COVERAGE * n_mask) & (n_val > 0)
 
 
+_IDX_MEMO: dict = {}
+
+
+def _compress(x: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Gather each row's universe members into a dense [T, K] block (K = max members per row)."""
+    key = (id(mask), mask.shape, int(mask.sum()))
+    if key not in _IDX_MEMO:
+        K = max(int(mask.sum(axis=1).max()), 1) if mask.size else 1
+        idx = np.argsort(~mask, axis=1, kind="stable")[:, :K]
+        if mask.shape[0] > 1000:
+            _IDX_MEMO.clear()
+            _IDX_MEMO[key] = (idx, np.take_along_axis(mask, idx, 1))
+        else:
+            return _gather(x, idx, np.take_along_axis(mask, idx, 1)), idx
+    idx, valid = _IDX_MEMO[key]
+    return _gather(x, idx, valid), idx
+
+
+def _gather(x: np.ndarray, idx: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    v = np.take_along_axis(np.asarray(x, dtype=np.float64), idx, 1)
+    v[~valid] = np.nan
+    return v
+
+
+def _avg_rank(v: np.ndarray) -> np.ndarray:
+    """1-based average-tie ranks per row; NaN stays NaN (vectorised pandas rank(method='average'))."""
+    T, K = v.shape
+    order = np.argsort(np.where(np.isnan(v), np.inf, v), axis=1, kind="stable")
+    sv = np.take_along_axis(v, order, 1)
+    pos = np.broadcast_to(np.arange(K), (T, K))
+    new = np.ones((T, K), dtype=bool)
+    new[:, 1:] = sv[:, 1:] != sv[:, :-1]
+    first = np.maximum.accumulate(np.where(new, pos, 0), axis=1)
+    end = np.ones((T, K), dtype=bool)
+    end[:, :-1] = new[:, 1:]
+    last = np.flip(np.minimum.accumulate(np.flip(np.where(end, pos, K), 1), axis=1), 1)
+    r_sorted = (first + last) / 2.0 + 1.0
+    r_sorted[np.isnan(sv)] = np.nan
+    r = np.empty_like(r_sorted)
+    np.put_along_axis(r, order, r_sorted, 1)
+    return r
+
+
 def xs_rank(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Percentile rank within the universe at each bar, centred to [-0.5, 0.5], ties averaged; NaN outside."""
-    v = np.where(mask, x, np.nan).astype(np.float64)
-    df = pd.DataFrame(v)
-    r = df.rank(axis=1, method="average").to_numpy()
-    cnt = df.count(axis=1).to_numpy()[:, None].astype(np.float64)
+    mask = np.asarray(mask, dtype=bool)
+    v, idx = _compress(x, mask)
+    r = _avg_rank(v)
+    cnt = np.isfinite(v).sum(axis=1, keepdims=True).astype(np.float64)
     with np.errstate(invalid="ignore", divide="ignore"):
         pct = np.where(cnt > 1, (r - 1) / (cnt - 1) - 0.5, np.where(np.isfinite(r), 0.0, np.nan))
-    pct[~_coverage_ok(v, mask)] = np.nan
-    return pct.astype(DTYPE)
+    n_mask = mask.sum(axis=1)
+    bad = (cnt[:, 0] < MIN_XS_COVERAGE * n_mask) | (cnt[:, 0] == 0)
+    pct[bad] = np.nan
+    out = np.full(np.shape(x), np.nan, dtype=DTYPE)
+    np.put_along_axis(out, idx, np.where(np.take_along_axis(mask, idx, 1), pct, np.nan).astype(DTYPE), 1)
+    return out
 
 
 def xs_zscore(x: np.ndarray, mask: np.ndarray, clip: float = 3.0) -> np.ndarray:
@@ -120,3 +205,21 @@ def xs_demean(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         return v - np.nanmean(v, axis=1, keepdims=True)
+
+
+def _build_worker(args) -> int:
+    panel_dir, names = args
+    from rsi.data.panel import load_panel
+    from pathlib import Path
+    panel = load_panel(Path(panel_dir))
+    compute_batch(panel, names)
+    return len(names)
+
+
+def build_parallel(panel_dir: str, panel: Panel, names: list[str], jobs: int = 3) -> None:
+    """Fill the feature cache with `jobs` processes (features sliced round-robin; cache writes are atomic)."""
+    from concurrent.futures import ProcessPoolExecutor
+    todo = [n for n in names if not _cache_path(panel, registry.get(n)).exists()]
+    chunks = [todo[i::jobs] for i in range(jobs) if todo[i::jobs]]
+    with ProcessPoolExecutor(len(chunks) or 1) as ex:
+        list(ex.map(_build_worker, [(panel_dir, c) for c in chunks]))

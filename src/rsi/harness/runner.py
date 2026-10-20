@@ -19,7 +19,7 @@ from rsi.features.featureset import build_batch, stack
 from rsi.harness import gates
 from rsi.harness.ledger import Ledger
 from rsi.harness.spec import ExperimentSpec
-from rsi.labels import fwd_logret, make_label
+from rsi.labels import fwd_funding, fwd_logret, make_label
 from rsi.models.core import Model
 from rsi.splits import Fold, walk_forward
 from rsi.universe import universe_masks
@@ -63,8 +63,22 @@ class Prepared:
     context: tuple
 
 
+def cached_masks(panel: Panel, uspec) -> tuple[np.ndarray, np.ndarray]:
+    from rsi.config import cache_dir
+    d = cache_dir() / "universe" / panel.fingerprint
+    key = stable_hash(uspec.model_dump())
+    p = d / f"{key}.npz"
+    if p.exists():
+        z = np.load(p)
+        return z["entry"], z["hold"]
+    entry, hold = universe_masks(panel, uspec)
+    d.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(p, entry=entry, hold=hold)
+    return entry, hold
+
+
 def prepare(spec: ExperimentSpec, panel: Panel) -> Prepared:
-    mask, hold = universe_masks(panel, spec.universe)
+    mask, hold = cached_masks(panel, spec.universe)
     names = spec.features.columns()
     contract.ensure_contract(panel, spec.features.base_names())
     cols = build_batch(panel, spec.features, hold, mask_key=stable_hash(spec.universe.model_dump()))
@@ -144,8 +158,10 @@ def evaluate(prep: Prepared, spec: ExperimentSpec, score: np.ndarray, t0: int, t
     m.update({"liquidations": res.liquidations, "disaster_day_loss": th["day_loss"], "disaster_max_dd": th["max_dd"],
               "disaster_triggers": disaster.count_triggers(res.times, res.equity, res.equity0, th),
               "eval_vol_target": h.gates.eval_vol_target})
-    fwd = fwd_logret(prep.panel, spec.label.horizon)
-    m.update({f"oos_{k}": v for k, v in M.ic_stats(score, fwd, prep.mask, slice(t0, t1)).items()})
+    fwd = fwd_logret(prep.panel, spec.label.horizon) - fwd_funding(prep.panel, spec.label.horizon)
+    cols = np.flatnonzero(prep.hold[t0:t1].any(axis=0))
+    m.update({f"oos_{k}": v for k, v in M.ic_stats(score[t0:t1:4][:, cols], fwd[t0:t1:4][:, cols],
+                                                   prep.mask[t0:t1:4][:, cols]).items()})
     fm = fold_metrics(res, prep.panel, folds, h.bars_per_year)
     return {"metrics": m, "folds": fm, "result": res}
 

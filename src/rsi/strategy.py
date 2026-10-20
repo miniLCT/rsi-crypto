@@ -23,6 +23,9 @@ class StrategySpec(BaseModel):
     exit_buffer: float = 0.1          # keep a holding until it falls this far past the entry cut
     weighting: Literal["equal", "score", "inv_vol"] = "equal"
     min_names: int = 10
+    # STR-03 signal conditioning (off by default -> identical to plain STR-01/02)
+    smooth_bars: int = 1              # score = mean of the last k bar scores (finite memory, turnover control)
+    min_abs_score: float = 0.0        # xs: names whose |score - median| is below this are not entered
     # ts_directional
     entry_z: float = 1.0
     exit_z: float = 0.25
@@ -33,6 +36,18 @@ class TargetBuilder:
     def __init__(self, spec: StrategySpec, n_symbols: int):
         self.spec = spec
         self.prev = np.zeros(n_symbols)
+        self.hist: list[np.ndarray] = []   # last smooth_bars raw score rows (persisted live)
+
+    def smooth(self, score: np.ndarray) -> np.ndarray:
+        k = self.spec.smooth_bars
+        if k <= 1:
+            return score
+        self.hist = (self.hist + [np.asarray(score, dtype=np.float64)])[-k:]
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            m = np.nanmean(np.vstack(self.hist), axis=0)
+        return np.where(np.isfinite(score), m, np.nan)
 
     def is_rebalance(self, bar_number: int) -> bool:
         return bar_number % self.spec.rebalance_bars == 0
@@ -44,12 +59,15 @@ class TargetBuilder:
         `mask` = names that may be entered; `hold` (superset) = names an existing position may stay in.
         """
         hold = mask if hold is None else (hold | mask)
+        score = self.smooth(score)
         held = self.prev != 0
         if not self.is_rebalance(bar_number):
             w = np.where(hold, self.prev, 0.0)   # names leaving the hold buffer are closed immediately
         else:
             ok = np.isfinite(score)
             entry = mask & ok
+            if self.spec.min_abs_score > 0 and entry.any():
+                entry &= np.abs(score - np.nanmedian(score[entry])) >= self.spec.min_abs_score
             keep = hold & held & ok
             if self.spec.kind == "xs_longshort":
                 w = self._xs(score, entry, keep, vol)

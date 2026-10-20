@@ -143,6 +143,7 @@ class Portfolio:
         self.exit_reason = np.full(S, "", dtype=object)
         self.peak = float(self.equity0)
         self.book_rets = deque(maxlen=self.risk.vol_lookback)
+        self._rs = self._rs2 = 0.0
         self.last_w_unscaled = np.zeros(S)
         self.ep_pnl = np.zeros(S)
         self.ep_open_ms = np.zeros(S, dtype=np.int64)
@@ -155,7 +156,10 @@ class Portfolio:
         return self.cash
 
     def notional(self) -> np.ndarray:
-        return np.where(self.qty != 0, self.qty * np.nan_to_num(self.mark), 0.0)
+        out = np.zeros(len(self.qty))
+        nz = self.qty != 0
+        out[nz] = self.qty[nz] * self.mark[nz]
+        return out
 
     def mark_to(self, prices: np.ndarray) -> float:
         """Variation-margin style: book PnL of price moves into cash, then update marks."""
@@ -179,15 +183,26 @@ class Portfolio:
 
     # ------------------------------------------------------------------ book return (for vol targeting)
     def record_book_return(self, bar_ret: np.ndarray) -> None:
-        r = float(np.nansum(self.last_w_unscaled * np.where(np.isfinite(bar_ret), bar_ret, 0.0)))
-        if np.any(self.last_w_unscaled != 0):
-            self.book_rets.append(r)
+        nz = self.last_w_unscaled != 0
+        if not nz.any():
+            return
+        br = bar_ret[nz]
+        r = float(np.sum(self.last_w_unscaled[nz] * np.where(np.isfinite(br), br, 0.0)))
+        if len(self.book_rets) == self.book_rets.maxlen:
+            old = self.book_rets[0]
+            self._rs -= old
+            self._rs2 -= old * old
+        self.book_rets.append(r)
+        self._rs += r
+        self._rs2 += r * r
 
     def vol_scale(self) -> float:
         rk = self.risk
-        if rk.vol_target is None or len(self.book_rets) < max(48, rk.vol_lookback // 4):
+        n = len(self.book_rets)
+        if rk.vol_target is None or n < max(48, rk.vol_lookback // 4):
             return 1.0
-        sd = float(np.std(self.book_rets)) * np.sqrt(self.bars_per_year)
+        var = max(self._rs2 / n - (self._rs / n) ** 2, 0.0)
+        sd = float(np.sqrt(var)) * np.sqrt(self.bars_per_year)
         if sd <= 0:
             return 1.0
         return float(np.clip(rk.vol_target / sd, rk.vol_scale_min, rk.vol_scale_max))
@@ -202,7 +217,11 @@ class Portfolio:
         """
         held = np.flatnonzero((self.qty != 0) & np.isfinite(self.hard_stop_px))
         hit = []
-        for i in held:
+        if len(held) == 0:
+            return hit
+        sp, q = self.hard_stop_px[held], self.qty[held]
+        trig = ((q > 0) & (low[held] <= sp)) | ((q < 0) & (high[held] >= sp))
+        for i in held[trig]:
             sp = self.hard_stop_px[i]
             if self.qty[i] > 0 and np.isfinite(low[i]) and low[i] <= sp:
                 px = min(open_[i], sp) if np.isfinite(open_[i]) else sp
@@ -458,3 +477,5 @@ class Portfolio:
         self.peak, self.halt_until_ms = d["peak"], d["halt_until_ms"]
         self.day, self.day_start_equity, self.day_halted = d["day"], d["day_start_equity"], d["day_halted"]
         self.book_rets = deque(d["book_rets"], maxlen=self.risk.vol_lookback)
+        self._rs = float(sum(self.book_rets))
+        self._rs2 = float(sum(x * x for x in self.book_rets))

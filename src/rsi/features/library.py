@@ -282,7 +282,8 @@ def _funding_chg(fv: FrameView) -> pd.DataFrame:
 def _funding_z(fv: FrameView) -> pd.DataFrame:
     f = _funding_1h(fv)
     sd = f.rolling(336, min_periods=48).std()
-    return (f - f.rolling(336, min_periods=48).mean()) / sd.where(sd > 0)
+    # constant funding prints give round-off-level std that depends on the window start; treat as undefined
+    return (f - f.rolling(336, min_periods=48).mean()) / sd.where(sd > 1e-9)
 
 
 def _prem(fv: FrameView, n: int) -> pd.DataFrame:

@@ -84,6 +84,7 @@ def build_batch(panel: Panel, spec: FeatureSpec, mask: np.ndarray, use_cache: bo
         if p is not None:
             p.parent.mkdir(parents=True, exist_ok=True)
             np.save(p, v)
+            out[c] = np.load(p, mmap_mode="r")   # keep resident memory bounded; the OS pages it in
     return out
 
 
