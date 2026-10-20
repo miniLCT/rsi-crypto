@@ -1,0 +1,9 @@
+name: xs_factor_momentum_7d
+hypothesis: >
+  Model-free control: 7-day cross-sectional momentum skipping the most recent day.
+universe: {kind: top_liquid, size: 50, adv_days: 30}
+features: {include: [ret_336_skip48], transform: rank}
+label: {horizon: 48}
+model: {kind: factor, weights: {"r:ret_336_skip48": 1.0}}
+strategy: {kind: xs_longshort, rebalance_bars: 48, long_frac: 0.2, short_frac: 0.2, exit_buffer: 0.1}
+risk: {vol_target: 0.3, stop_loss_vol: 4.0}

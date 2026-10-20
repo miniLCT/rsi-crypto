@@ -1,0 +1,8 @@
+# Paper trading on live mainnet data; fills simulated at the reference price + harness cost model.
+mode: paper
+model_dir: models/CHANGE_ME          # output of `rsi export <run_id>`
+state_dir: live_state/paper
+capital_usd: 10000
+symbols: null                         # e.g. [BTCUSDT] to restrict to a single coin
+risk_overrides: {}                    # may only tighten, e.g. {max_gross: 1.0}
+exec_delay_s: 4

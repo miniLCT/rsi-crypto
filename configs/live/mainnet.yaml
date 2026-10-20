@@ -1,0 +1,8 @@
+# REAL MONEY. Only for models whose holdout passed and that ran clean on paper/testnet.
+mode: mainnet
+model_dir: models/CHANGE_ME
+state_dir: live_state/mainnet
+leverage: 3
+symbols: null
+risk_overrides: {max_gross: 1.0, dd_halt: 0.15, daily_loss_halt: 0.04}
+exec_delay_s: 4

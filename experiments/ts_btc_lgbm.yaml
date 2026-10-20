@@ -1,0 +1,19 @@
+name: ts_btc_lgbm
+hypothesis: >
+  Single-instrument directional model for BTCUSDT: raw (non-ranked) features predict the
+  vol-normalised 4h forward return; trade long/short only on strong scores.
+universe: {kind: fixed, symbols: [BTCUSDT]}
+features: {include: [all, "-group:carry"], transform: raw}
+label: {horizon: 8, xs_demean: false, vol_norm: true}
+model:
+  kind: lgbm
+  train_stride: 1
+  num_boost_round: 300
+  params: {learning_rate: 0.02, num_leaves: 7, min_data_in_leaf: 400, feature_fraction: 0.5, lambda_l2: 50}
+strategy: {kind: ts_directional, rebalance_bars: 2, entry_z: 1.0, exit_z: 0.25, max_names: 1, gross: 1.0}
+risk: {max_weight: 1.5, max_gross: 1.5, vol_target: 0.4, stop_loss_vol: 3.0, dd_halt: 0.25}
+search_space:
+  label.horizon: [4, 8, 16, 48]
+  strategy.entry_z: [0.5, 1.0, 1.5]
+  strategy.rebalance_bars: [1, 2, 4]
+  model.params.num_leaves: [3, 7, 15]

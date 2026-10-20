@@ -1,0 +1,105 @@
+"""Score -> target weights (fraction of equity, signed). Stateful but deterministic.
+
+The same `TargetBuilder.step` is called bar-by-bar in backtest and live; its
+only state is the previous target vector, which live persists across restarts.
+"""
+from __future__ import annotations
+
+from typing import Literal
+
+import numpy as np
+from pydantic import BaseModel
+
+
+class StrategySpec(BaseModel):
+    kind: Literal["xs_longshort", "ts_directional"] = "xs_longshort"
+    rebalance_bars: int = 2           # act on bars where (bar_number % k == 0), absolute clock
+    gross: float = 1.0                # sum |w| before risk overlays
+    allow_long: bool = True
+    allow_short: bool = True
+    # xs_longshort
+    long_frac: float = 0.2
+    short_frac: float = 0.2
+    exit_buffer: float = 0.1          # keep a holding until it falls this far past the entry cut
+    weighting: Literal["equal", "score", "inv_vol"] = "equal"
+    min_names: int = 10
+    # ts_directional
+    entry_z: float = 1.0
+    exit_z: float = 0.25
+    max_names: int = 10               # weight per name = gross / max_names
+
+
+class TargetBuilder:
+    def __init__(self, spec: StrategySpec, n_symbols: int):
+        self.spec = spec
+        self.prev = np.zeros(n_symbols)
+
+    def is_rebalance(self, bar_number: int) -> bool:
+        return bar_number % self.spec.rebalance_bars == 0
+
+    def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None) -> np.ndarray:
+        """score/mask/vol: [S] rows for the decision bar. Returns target weights [S]."""
+        alive = mask & np.isfinite(score)
+        if not self.is_rebalance(bar_number):
+            w = np.where(mask, self.prev, 0.0)   # names leaving the universe are closed immediately
+        elif self.spec.kind == "xs_longshort":
+            w = self._xs(score, alive, vol)
+        else:
+            w = self._ts(score, alive)
+        self.prev = w
+        return w
+
+    # ------------------------------------------------------------------ cross-sectional
+    def _xs(self, score: np.ndarray, alive: np.ndarray, vol: np.ndarray | None) -> np.ndarray:
+        sp = self.spec
+        w = np.zeros_like(score, dtype=np.float64)
+        idx = np.flatnonzero(alive)
+        n = len(idx)
+        if n < sp.min_names:
+            return w
+        order = idx[np.argsort(-score[idx], kind="stable")]       # best first
+        rank = np.empty(len(score)); rank[:] = np.nan
+        rank[order] = np.arange(n) / max(n - 1, 1)                 # 0 = best, 1 = worst
+        sides = []
+        if sp.allow_long:
+            sides.append((+1, sp.long_frac, rank))
+        if sp.allow_short:
+            sides.append((-1, sp.short_frac, 1 - rank))
+        for sign, frac, r in sides:
+            k = max(1, int(np.floor(frac * n)))
+            held = np.flatnonzero((np.sign(self.prev) == sign) & alive & (r <= frac + sp.exit_buffer))
+            held = held[np.argsort(r[held])][:k]
+            cand = [i for i in np.argsort(np.where(alive, r, np.inf)) if np.isfinite(r[i]) and i not in set(held)]
+            chosen = list(held) + cand[: k - len(held)]
+            chosen = np.array(chosen, dtype=int)
+            if sp.weighting == "score":
+                raw = np.abs(score[chosen] - np.nanmedian(score[idx])) + 1e-9
+            elif sp.weighting == "inv_vol" and vol is not None:
+                raw = 1.0 / np.clip(np.nan_to_num(vol[chosen], nan=np.nanmedian(vol[idx])), 1e-4, None)
+            else:
+                raw = np.ones(len(chosen))
+            side_gross = sp.gross / len(sides)
+            w[chosen] = sign * side_gross * raw / raw.sum()
+        return w
+
+    # ------------------------------------------------------------------ time-series
+    def _ts(self, z: np.ndarray, alive: np.ndarray) -> np.ndarray:
+        sp = self.spec
+        unit = sp.gross / sp.max_names
+        pos = np.sign(self.prev)
+        new = np.zeros_like(pos)
+        zz = np.where(alive, z, 0.0)
+        long_in = (zz > sp.entry_z) & sp.allow_long
+        short_in = (zz < -sp.entry_z) & sp.allow_short
+        keep_long = (pos > 0) & (zz > sp.exit_z) & alive
+        keep_short = (pos < 0) & (zz < -sp.exit_z) & alive
+        new[keep_long] = 1
+        new[keep_short] = -1
+        new[long_in] = 1
+        new[short_in] = -1
+        if np.count_nonzero(new) > sp.max_names:
+            strength = np.abs(zz) * (new != 0)
+            keep = np.argsort(-strength)[: sp.max_names]
+            m = np.zeros_like(new, dtype=bool); m[keep] = True
+            new = np.where(m, new, 0)
+        return new * unit

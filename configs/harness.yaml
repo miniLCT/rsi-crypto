@@ -1,0 +1,48 @@
+# ============================================================================
+# HARNESS CONTRACT — evaluation rules shared by every experiment.
+# Research agents (human or LLM) must NOT edit this file during an RSI loop.
+# Changing it invalidates comparisons with every run in the ledger; bump
+# `version` when you do, and the ledger will segregate results by version.
+# ============================================================================
+version: 1
+bar: 30m
+bars_per_year: 17520          # 48 bars/day * 365
+
+periods:
+  research_start: "2020-07-01"
+  research_end: "2025-10-01"   # exclusive; everything after is invisible to research runs
+  holdout_start: "2025-10-01"
+  holdout_end: "2026-10-01"    # exclusive
+
+walk_forward:
+  first_test: "2022-01-01"
+  test_months: 3
+  train_months: 24             # rolling window; null => expanding
+  embargo_bars: 48             # 1 day gap after label horizon purge
+
+holdout:
+  max_looks_per_30d: 3         # every look is written to the ledger
+
+costs:
+  taker_fee_bps: 5.0           # VIP0 taker
+  spread_coef_bps: 10.0        # half-spread = coef / sqrt(ADV_usd / 1e6), clipped
+  min_half_spread_bps: 0.5
+  max_half_spread_bps: 30.0
+  impact_eta: 0.5              # square-root impact on daily vol
+  delist_penalty_bps: 200.0    # forced exit when a symbol stops printing
+
+capital:
+  initial_usd: 10000.0
+
+gates:
+  # minimum bar for a run to be marked `pass` (net of all costs, walk-forward OOS)
+  min_sharpe: 1.0
+  min_dsr: 0.90                # deflated Sharpe probability, n_trials from the ledger
+  max_drawdown: 0.30
+  min_positive_fold_frac: 0.6
+  min_trades: 200
+  # champion replacement requires a margin over the incumbent
+  champion_sharpe_margin: 0.15
+  # holdout check before a model may go live
+  holdout_min_sharpe_ratio: 0.4  # holdout sharpe >= ratio * research sharpe
+  holdout_min_sharpe: 0.3

@@ -1,0 +1,21 @@
+# Raw market data contract for Binance USDT-M perpetuals.
+# Source of truth for history: https://data.binance.vision (same numbers the live REST API serves).
+root: data
+market: um
+interval: 30m            # base research / decision bar
+start_month: "2020-01"
+datasets:
+  - klines               # OHLCV + quote volume + trade count + taker-buy volume
+  - fundingRate          # realised funding prints (cost + carry signal)
+  - premiumIndexKlines   # perp premium vs index (basis signal)
+symbol_filter:
+  quote: USDT
+  # delivery contracts (BTCUSDT_250328), stablecoin pairs, composite indices
+  exclude_regex: ['_\d{6}$', '^(USDC|BUSD|TUSD|FDUSD|USDP|DAI|USDE|USD1|RLUSD|EUR|GBP|AEUR)USDT$']
+  exclude: [BTCDOMUSDT, DEFIUSDT, FOOTBALLUSDT, BLUEBIRDUSDT, ALLUSDT]
+  # exchangeInfo.underlyingType; symbols no longer listed there (old delistings) are kept unless excluded above
+  underlying_types: [COIN]
+download:
+  concurrency: 48
+  verify_checksum: true
+  retries: 4

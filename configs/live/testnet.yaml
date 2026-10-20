@@ -1,0 +1,9 @@
+# Real orders on Binance futures demo trading (https://demo.binance.com). Signals use mainnet data.
+# export BINANCE_API_KEY=... and BINANCE_API_SECRET=... (or BINANCE_ED25519_KEY=/path/key.pem)
+mode: testnet
+model_dir: models/CHANGE_ME
+state_dir: live_state/testnet
+leverage: 3
+symbols: null
+risk_overrides: {max_gross: 1.5}
+exec_delay_s: 4
