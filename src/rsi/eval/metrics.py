@@ -45,7 +45,7 @@ def deflated_sharpe(daily_r: np.ndarray, n_trials: int, trial_sr_var: float | No
     if len(r) < 30 or r.std() == 0:
         return 0.0
     sr = r.mean() / r.std(ddof=1)
-    var = trial_sr_var if trial_sr_var is not None and trial_sr_var > 0 else 1.0 / len(r)
+    var = max(trial_sr_var or 0.0, 1.0 / len(r))   # never below the sampling variance of a daily SR
     sr0 = expected_max_sr(max(n_trials, 1), var)
     return psr(sr, sr0, len(r), float(stats.skew(r)), float(stats.kurtosis(r, fisher=False)))
 

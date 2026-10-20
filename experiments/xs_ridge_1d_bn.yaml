@@ -1,0 +1,58 @@
+name: xs_ridge_1d_bn
+parent: xs_ridge_1d
+hypothesis: 'Long leg loses (-35%) while the short leg earns: the book carries residual
+  BTC beta. Rescaling legs to zero beta (constant gross) should remove the market
+  drag on the long side.'
+universe:
+  kind: top_liquid
+  size: 100
+  keep_rank: 120
+features:
+  include:
+  - all
+  - -group:calendar
+  transform: rank
+label:
+  horizon: 48
+  xs_demean: true
+  vol_norm: true
+  clip: 5.0
+model:
+  kind: ridge
+  ridge_alpha: 100.0
+  train_stride: 4
+strategy:
+  kind: xs_longshort
+  rebalance_bars: 8
+  long_frac: 0.2
+  short_frac: 0.2
+  exit_buffer: 0.25
+  smooth_bars: 4
+  beta_neutral: true
+risk:
+  max_weight: 0.05
+  hold_horizon_bars: 48
+search_space:
+  model.ridge_alpha:
+  - 10.0
+  - 100.0
+  - 1000.0
+  strategy.rebalance_bars:
+  - 8
+  - 16
+  - 48
+  strategy.exit_buffer:
+  - 0.15
+  - 0.25
+  - 0.35
+  strategy.smooth_bars:
+  - 1
+  - 4
+  - 12
+  strategy.long_frac:
+  - 0.1
+  - 0.2
+  - 0.3
+  label.horizon:
+  - 48
+  - 96

@@ -59,9 +59,16 @@ def market_context(panel: Panel) -> tuple[np.ndarray, np.ndarray]:
     return adv, dvol
 
 
+def beta_to_btc(panel: Panel, n: int = 336) -> np.ndarray:
+    """Causal 7d beta of every symbol to BTCUSDT (same definition as feature beta_btc_336)."""
+    from rsi.features.engine import compute_batch
+    return np.asarray(compute_batch(panel, ["beta_btc_336"])["beta_btc_336"], dtype=np.float64)
+
+
 def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: StrategySpec, risk: RiskSpec,
                  costs: CostCfg, equity0: float, t0: int, t1: int, bars_per_year: int = 17520,
-                 context: tuple[np.ndarray, np.ndarray] | None = None, hold: np.ndarray | None = None) -> BacktestResult:
+                 context: tuple[np.ndarray, np.ndarray] | None = None, hold: np.ndarray | None = None,
+                 beta: np.ndarray | None = None) -> BacktestResult:
     step = interval_ms(panel.interval)
     T = panel.T
     t1 = min(t1, T)
@@ -74,6 +81,9 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
     o, h, lo, c, fr = (np.asarray(panel[f])[:, cols] for f in ("open", "high", "low", "close", "funding_rate"))
     adv, dvol, score, mask = adv[:, cols], dvol[:, cols], score[:, cols], mask[:, cols]
     hold = hold[:, cols] if hold is not None else None
+    if strat.beta_neutral and beta is None:
+        beta = beta_to_btc(panel)
+    beta = beta[:, cols] if beta is not None else None
     port = Portfolio(symbols, equity0, costs, risk, bars_per_year, step)
     builder = TargetBuilder(strat, S)
     n = t1 - t0
@@ -95,7 +105,7 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
             if t > 0:
                 port.record_book_return(c[t] / c[t - 1] - 1)
             hrow = hold[t] if hold is not None else None
-            w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow)
+            w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow, beta[t] if beta is not None else None)
             q = port.target_qty(int(times[t] + step), bar_no, w, c[t], adv[t], dvol[t], mask[t])
             if t + 1 >= T or k == n - 1:
                 break

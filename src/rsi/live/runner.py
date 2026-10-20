@@ -279,7 +279,11 @@ class LiveRunner:
         if len(idx):
             score[idx] = self.model.predict(X)
 
-        w = self.builder.step(bar_no, score, uni, dvol, hold)
+        beta = None
+        if self.spec.strategy.beta_neutral:
+            from rsi.features.engine import compute_last
+            beta = compute_last(win, ["beta_btc_336"])["beta_btc_336"].astype(np.float64)
+        w = self.builder.step(bar_no, score, uni, dvol, hold, beta)
         if self.trade_symbols is not None:
             w = np.where([s in self.trade_symbols for s in win.symbols], w, 0.0)
 

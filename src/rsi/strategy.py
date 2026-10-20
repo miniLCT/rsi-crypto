@@ -26,6 +26,7 @@ class StrategySpec(BaseModel):
     # STR-03 signal conditioning (off by default -> identical to plain STR-01/02)
     smooth_bars: int = 1              # score = mean of the last k bar scores (finite memory, turnover control)
     min_abs_score: float = 0.0        # xs: names whose |score - median| is below this are not entered
+    beta_neutral: bool = False        # xs: rescale the two legs so that sum(w * beta_btc) = 0 at constant gross
     # ts_directional
     entry_z: float = 1.0
     exit_z: float = 0.25
@@ -53,7 +54,7 @@ class TargetBuilder:
         return bar_number % self.spec.rebalance_bars == 0
 
     def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None,
-             hold: np.ndarray | None = None) -> np.ndarray:
+             hold: np.ndarray | None = None, beta: np.ndarray | None = None) -> np.ndarray:
         """score/mask/vol/hold: [S] rows for the decision bar. Returns target weights [S].
 
         `mask` = names that may be entered; `hold` (superset) = names an existing position may stay in.
@@ -71,6 +72,8 @@ class TargetBuilder:
             keep = hold & held & ok
             if self.spec.kind == "xs_longshort":
                 w = self._xs(score, entry, keep, vol)
+                if self.spec.beta_neutral and beta is not None:
+                    w = self._beta_neutral(w, beta)
             else:
                 w = self._ts(score, entry, keep)
         self.prev = w
@@ -111,6 +114,18 @@ class TargetBuilder:
             side_gross = sp.gross / len(sides)
             w[chosen] = sign * side_gross * raw / raw.sum()
         return w
+
+    def _beta_neutral(self, w: np.ndarray, beta: np.ndarray) -> np.ndarray:
+        b = np.where(np.isfinite(beta), np.clip(beta, 0.1, 3.0), 1.0)
+        lg, sh = w > 0, w < 0
+        GL, GS = w[lg].sum(), -w[sh].sum()
+        BL, BS = (w[lg] * b[lg]).sum(), (-w[sh] * b[sh]).sum()
+        den = GL * BS + GS * BL
+        if GL <= 0 or GS <= 0 or den <= 0:
+            return w
+        gross = GL + GS
+        a, c = gross * BS / den, gross * BL / den
+        return np.where(lg, w * a, np.where(sh, w * c, 0.0))
 
     # ------------------------------------------------------------------ time-series
     def _ts(self, z: np.ndarray, entry: np.ndarray, keep: np.ndarray) -> np.ndarray:

@@ -57,10 +57,13 @@ class Prepared:
     panel: Panel
     mask: np.ndarray        # entry universe: training rows, new positions
     hold: np.ndarray        # hold buffer (superset): scored every bar so held names can be managed
-    cols: dict
+    cols: dict              # model columns in compact layout [T, K]: slot k of bar t is symbol idx[t, k]
     names: list[str]
-    y: np.ndarray
+    y: np.ndarray           # labels, compact layout
     context: tuple
+    idx: np.ndarray = None  # [T, K] symbol index per compact slot
+    kmask: np.ndarray = None
+    khold: np.ndarray = None
 
 
 def cached_masks(panel: Panel, uspec) -> tuple[np.ndarray, np.ndarray]:
@@ -77,13 +80,37 @@ def cached_masks(panel: Panel, uspec) -> tuple[np.ndarray, np.ndarray]:
     return entry, hold
 
 
+def _compact_cols(panel: Panel, spec: ExperimentSpec, hold: np.ndarray, idx: np.ndarray) -> dict:
+    """Model columns gathered to the hold-universe slots, cached on disk (~K/S of the full size)."""
+    from rsi.config import cache_dir
+    from rsi.features import registry
+    ukey = stable_hash(spec.universe.model_dump())
+    d = cache_dir() / "features" / panel.fingerprint / f"compact-{ukey}"
+    out, full = {}, None
+    for c in spec.features.columns():
+        base = c.split(":", 1)[-1]
+        p = d / f"{c.replace(':', '__')}-{registry.get(base).src_hash}-{int(spec.features.neutralize)}.npy"
+        if not p.exists():
+            if full is None:
+                full = build_batch(panel, spec.features, hold, mask_key=ukey)
+            d.mkdir(parents=True, exist_ok=True)
+            np.save(p, np.take_along_axis(np.asarray(full[c]), idx, 1))
+        out[c] = np.load(p, mmap_mode="r")
+    return out
+
+
 def prepare(spec: ExperimentSpec, panel: Panel) -> Prepared:
     mask, hold = cached_masks(panel, spec.universe)
     names = spec.features.columns()
     contract.ensure_contract(panel, spec.features.base_names())
-    cols = build_batch(panel, spec.features, hold, mask_key=stable_hash(spec.universe.model_dump()))
-    y = make_label(panel, spec.label, mask, valid_until=panel.T)
-    return Prepared(panel, mask, hold, cols, names, y, market_context(panel))
+    K = max(int(hold.sum(axis=1).max()), 1)
+    idx = np.argsort(~hold, axis=1, kind="stable")[:, :K]
+    kh = np.take_along_axis(hold, idx, 1)
+    km = np.take_along_axis(mask, idx, 1) & kh
+    cols = _compact_cols(panel, spec, hold, idx)
+    y = np.take_along_axis(make_label(panel, spec.label, mask, valid_until=panel.T), idx, 1)
+    y[~km] = np.nan
+    return Prepared(panel, mask, hold, cols, names, y, market_context(panel), idx, km, kh)
 
 
 def _rows(mask: np.ndarray, y: np.ndarray | None, i0: int, i1: int, stride: int = 1) -> tuple[np.ndarray, np.ndarray]:
@@ -94,32 +121,50 @@ def _rows(mask: np.ndarray, y: np.ndarray | None, i0: int, i1: int, stride: int 
     return t * stride + i0, s
 
 
-def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold) -> Model:
+class TrainRows:
+    """All stride-sampled training rows of the run, materialised once (one sequential pass per feature).
+    Folds select by time; avoids re-reading every feature array for every fold."""
+
+    def __init__(self, prep: Prepared, stride: int, i0: int, i1: int):
+        t, s = _rows(prep.kmask, prep.y, i0, i1, stride)
+        self.t, self.s = t, s
+        self.X = stack(prep.cols, prep.names, t, s)
+        self.y = prep.y[t, s]
+
+    def take(self, a: int, b: int) -> tuple[np.ndarray, np.ndarray]:
+        sel = (self.t >= a) & (self.t < b)
+        return self.X[sel], self.y[sel]
+
+
+def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold, rows: TrainRows | None = None) -> Model:
     tr0, tr1 = fold.train
     ms = spec.model
     n_valid = int((tr1 - tr0) * ms.valid_frac) if ms.kind == "lgbm" else 0
     split = tr1 - n_valid
-    t, s = _rows(prep.mask, prep.y, tr0, split - (spec.label.span if n_valid else 0), ms.train_stride)
-    X, yy = stack(prep.cols, prep.names, t, s), prep.y[t, s]
+    rows = rows or TrainRows(prep, ms.train_stride, tr0, tr1)
+    X, yy = rows.take(tr0, split - (spec.label.span if n_valid else 0))
     Xv = yv = None
     if n_valid:
-        tv, sv = _rows(prep.mask, prep.y, split, tr1, ms.train_stride)
-        Xv, yv = stack(prep.cols, prep.names, tv, sv), prep.y[tv, sv]
+        Xv, yv = rows.take(split, tr1)
     return Model(ms, prep.names).fit(X, yy, Xv, yv)
 
 
 def predict_rows(prep: Prepared, model: Model, i0: int, i1: int, out: np.ndarray) -> None:
-    t, s = _rows(prep.hold, None, i0, i1)
+    t, k = _rows(prep.khold, None, i0, i1)
     if len(t):
-        out[t, s] = model.predict(stack(prep.cols, prep.names, t, s))
+        sub = {n: np.asarray(prep.cols[n][i0:i1]) for n in prep.names}   # contiguous time slice
+        out[t, prep.idx[t, k]] = model.predict(stack(sub, prep.names, t - i0, k))
 
 
 def oos_scores(prep: Prepared, spec: ExperimentSpec, folds: list[Fold]) -> tuple[np.ndarray, list[dict]]:
     score = np.full(prep.mask.shape, np.nan)
     info = []
+    t0 = time.time()
+    rows = TrainRows(prep, spec.model.train_stride, min(f.train[0] for f in folds), max(f.train[1] for f in folds))
+    log.info(f"training rows: {len(rows.y):,} x {len(prep.names)} built in {time.time() - t0:.0f}s")
     for f in folds:
         t0 = time.time()
-        m = fit_fold(prep, spec, f)
+        m = fit_fold(prep, spec, f, rows)
         predict_rows(prep, m, *f.test, score)
         info.append({**f.as_dict(prep.panel.times), "best_iter": m.best_iter, "fit_s": round(time.time() - t0, 1),
                      "importance": m.importance})

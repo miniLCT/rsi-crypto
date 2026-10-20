@@ -30,6 +30,7 @@ class ModelSpec(BaseModel):
     params: dict = Field(default_factory=dict)
     num_boost_round: int = 400
     early_stopping: int = 50
+    early_stop_metric: Literal["loss", "corr"] = "corr"
     valid_frac: float = 0.15          # tail of each training window used for early stopping
     train_stride: int = 2             # use every k-th bar for training (labels overlap anyway)
     ridge_alpha: float = 10.0
@@ -54,8 +55,18 @@ class Model:
             params = {**DEFAULT_LGBM, **self.spec.params, "seed": self.spec.seed}
             dtr = lgb.Dataset(X, y, feature_name=self._safe_cols(), free_raw_data=True)
             valid = [lgb.Dataset(Xv, yv, reference=dtr)] if Xv is not None and len(Xv) else []
-            cbs = [lgb.early_stopping(self.spec.early_stopping, verbose=False)] if valid else []
-            self.obj = lgb.train(params, dtr, num_boost_round=self.spec.num_boost_round, valid_sets=valid, callbacks=cbs)
+            cbs = [lgb.early_stopping(self.spec.early_stopping, first_metric_only=True, verbose=False)] if valid else []
+            feval = None
+            if valid and self.spec.early_stop_metric == "corr":
+                # weak signals barely move the loss; stop on prediction/label correlation (IC proxy) instead
+                params = {**params, "metric": "None"}
+
+                def feval(preds, data):
+                    lab = data.get_label()
+                    c = np.corrcoef(preds, lab)[0, 1] if np.std(preds) > 0 else 0.0
+                    return "corr", float(c), True
+            self.obj = lgb.train(params, dtr, num_boost_round=self.spec.num_boost_round, valid_sets=valid,
+                                 callbacks=cbs, feval=feval)
             self.best_iter = self.obj.best_iteration or self.spec.num_boost_round
             gain = self.obj.feature_importance("gain")
             tot = gain.sum() or 1.0

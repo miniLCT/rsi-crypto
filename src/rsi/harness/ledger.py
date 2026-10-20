@@ -77,8 +77,12 @@ class Ledger:
                 continue
             seen.add(r["spec_hash"])
             srs.append(r["daily_sr"])
-        var = float(np.var(srs, ddof=1)) if len(srs) >= 5 else None
-        return len(seen), var
+        if len(srs) < 5:
+            return len(seen), None
+        # robust spread: a few broken trials (e.g. cost-blown) must not inflate the null's max-SR benchmark
+        a = np.asarray(srs)
+        mad = 1.4826 * np.median(np.abs(a - np.median(a)))
+        return len(seen), float(mad ** 2)
 
     def set_status(self, run_id: str, status: str, note: str | None = None) -> None:
         with self._conn() as c:

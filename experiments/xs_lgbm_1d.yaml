@@ -1,0 +1,29 @@
+name: xs_lgbm_1d
+parent: xs_lgbm_base
+hypothesis: >
+  Costs dominate at short horizons (1d reversal: IC 0.03 but 900x turnover). Predict the 1d
+  funding-inclusive return instead, rebalance every 4h with a wide hysteresis band and 2h score
+  smoothing, so the same cross-sectional information is harvested at a fraction of the turnover.
+universe: {kind: top_liquid, size: 100, keep_rank: 120}
+features: {include: [all, "-group:calendar"], transform: rank}
+label: {horizon: 48, xs_demean: true, vol_norm: true, clip: 5.0}
+model:
+  kind: lgbm
+  train_stride: 4
+  num_boost_round: 400
+  params: {learning_rate: 0.02, num_leaves: 15, min_data_in_leaf: 5000, feature_fraction: 0.6, lambda_l2: 20}
+strategy:
+  kind: xs_longshort
+  rebalance_bars: 8
+  long_frac: 0.2
+  short_frac: 0.2
+  exit_buffer: 0.25
+  smooth_bars: 4
+risk: {max_weight: 0.05, hold_horizon_bars: 48}
+search_space:
+  label.horizon: [16, 48, 96]
+  strategy.rebalance_bars: [4, 8, 16, 48]
+  strategy.exit_buffer: [0.15, 0.25, 0.35]
+  strategy.smooth_bars: [1, 4, 12]
+  strategy.long_frac: [0.1, 0.2, 0.3]
+  model.params.num_leaves: [7, 15, 31]
