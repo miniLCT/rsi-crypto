@@ -89,3 +89,96 @@ Auto-generated entries per run (HRN-08); add a `- conclusion:` line under each.
 - hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 12, 'strategy.long_frac': 0.3, 'label.horizon': 96}
 - sharpe 0.66 · dsr 0.01 · cagr 15.6% · mdd 35.4% · turnover 102x · fees 67.5% · funding -60.8% · long -24.6% / short +86.7% · ic 0.0357
 - failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-194613-7933eb · xs_ridge_1d_bn~s12.1 · **fail**
+- date: 2026-10-20 19:46 · parent: xs_ridge_1d_bn · trials so far: 12
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.3, 'label.horizon': 96}
+- sharpe 0.97 · dsr 0.23 · cagr 26.9% · mdd 34.0% · turnover 169x · fees 125.1% · funding -78.1% · long +50.7% / short +90.7% · ic 0.0324
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-194614-bb5f8f · xs_ridge_1d_bn~s11.1 · **fail**
+- date: 2026-10-20 19:46 · parent: xs_ridge_1d_bn · trials so far: 12
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 1000.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 12, 'strategy.long_frac': 0.1, 'label.horizon': 48}
+- sharpe 0.85 · dsr 0.18 · cagr 27.5% · mdd 46.3% · turnover 86x · fees 80.9% · funding -79.3% · long +37.1% / short +107.8% · ic 0.0362
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-195616-a2b2ea · xs_ridge_1d_bn~s12.2 · **fail**
+- date: 2026-10-20 19:56 · parent: xs_ridge_1d_bn · trials so far: 14
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.1, 'label.horizon': 96}
+- sharpe 0.98 · dsr 0.56 · cagr 32.8% · mdd 33.9% · turnover 153x · fees 161.3% · funding -113.8% · long +110.9% / short +72.4% · ic 0.0324
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-195617-491ee6 · xs_ridge_1d_bn~s11.2 · **fail**
+- date: 2026-10-20 19:56 · parent: xs_ridge_1d_bn · trials so far: 14
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.3, 'label.horizon': 48}
+- sharpe 1.47 · dsr 0.85 · cagr 45.6% · mdd 37.8% · turnover 193x · fees 195.3% · funding -89.3% · long +112.1% / short +194.8% · ic 0.0341
+- failed gates: dsr, max_drawdown · no incumbent
+
+### 20261020-200650-3d3d43 · xs_ridge_1d_bn~s12.3 · **fail**
+- date: 2026-10-20 20:06 · parent: xs_ridge_1d_bn · trials so far: 16
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.1, 'label.horizon': 48}
+- sharpe 1.09 · dsr 0.61 · cagr 37.7% · mdd 40.4% · turnover 161x · fees 171.8% · funding -105.5% · long +109.4% / short +113.5% · ic 0.0308
+- failed gates: dsr, max_drawdown · no incumbent
+
+### 20261020-200652-0a9cd5 · xs_ridge_1d_bn~s11.3 · **fail**
+- date: 2026-10-20 20:06 · parent: xs_ridge_1d_bn · trials so far: 16
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.3, 'label.horizon': 96}
+- sharpe 1.08 · dsr 0.59 · cagr 30.3% · mdd 39.5% · turnover 181x · fees 139.5% · funding -83.1% · long +52.0% / short +116.3% · ic 0.0357
+- failed gates: dsr, max_drawdown · no incumbent
+
+### 20261020-201650-1f11d3 · xs_ridge_1d_bn~s12.4 · **fail**
+- date: 2026-10-20 20:16 · parent: xs_ridge_1d_bn · trials so far: 18
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.15, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.1, 'label.horizon': 96}
+- sharpe 0.76 · dsr 0.34 · cagr 22.6% · mdd 51.3% · turnover 229x · fees 190.5% · funding -88.9% · long +67.0% / short +44.5% · ic 0.0324
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-201653-a63d65 · xs_ridge_1d_bn~s11.4 · **fail**
+- date: 2026-10-20 20:16 · parent: xs_ridge_1d_bn · trials so far: 18
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 12, 'strategy.long_frac': 0.3, 'label.horizon': 48}
+- sharpe 1.31 · dsr 0.73 · cagr 39.0% · mdd 36.0% · turnover 162x · fees 155.4% · funding -83.6% · long +43.1% / short +199.5% · ic 0.0341
+- failed gates: dsr, max_drawdown · no incumbent
+
+### 20261020-202628-d3be5e · xs_ridge_1d_bn~s12.5 · **fail**
+- date: 2026-10-20 20:26 · parent: xs_ridge_1d_bn · trials so far: 20
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 1, 'strategy.long_frac': 0.1, 'label.horizon': 96}
+- sharpe 1.14 · dsr 0.61 · cagr 40.3% · mdd 35.0% · turnover 146x · fees 165.2% · funding -122.7% · long +138.1% / short +104.6% · ic 0.0324
+- failed gates: dsr, max_drawdown · no incumbent
+
+### 20261020-202634-fa57da · xs_ridge_1d_bn~s11.5 · **fail**
+- date: 2026-10-20 20:26 · parent: xs_ridge_1d_bn · trials so far: 20
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.1, 'label.horizon': 48}
+- sharpe 0.94 · dsr 0.47 · cagr 31.0% · mdd 39.9% · turnover 181x · fees 186.3% · funding -78.2% · long -3.9% / short +178.3% · ic 0.0341
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-203641-050cce · xs_ridge_1d_bn~s12.6 · **fail**
+- date: 2026-10-20 20:36 · parent: xs_ridge_1d_bn · trials so far: 22
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 1, 'strategy.long_frac': 0.1, 'label.horizon': 96}
+- sharpe 0.81 · dsr 0.34 · cagr 25.2% · mdd 39.6% · turnover 135x · fees 114.9% · funding -76.3% · long -8.1% / short +131.7% · ic 0.0357
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-203642-57357f · xs_ridge_1d_bn~s11.6 · **champion**
+- date: 2026-10-20 20:36 · parent: xs_ridge_1d_bn · trials so far: 22
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 1, 'strategy.long_frac': 0.2, 'label.horizon': 96}
+- sharpe 1.82 · dsr 0.93 · cagr 57.9% · mdd 29.2% · turnover 167x · fees 258.2% · funding -186.6% · long +261.9% / short +167.9% · ic 0.0324
+- failed gates: none · no incumbent
+
+### 20261020-204635-b1a348 · xs_ridge_1d_bn~s11.7 · **fail**
+- date: 2026-10-20 20:46 · parent: xs_ridge_1d_bn · trials so far: 24
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 1, 'strategy.long_frac': 0.2, 'label.horizon': 96}
+- sharpe 1.56 · dsr 0.84 · cagr 46.5% · mdd 24.7% · turnover 142x · fees 162.3% · funding -143.5% · long +133.3% / short +159.4% · ic 0.0324
+- failed gates: dsr · sharpe 1.56 vs champion 1.82 (margin -0.26, need 0.15)
+
+### 20261020-204636-53624a · xs_ridge_1d_bn~s12.7 · **fail**
+- date: 2026-10-20 20:46 · parent: xs_ridge_1d_bn · trials so far: 24
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 10.0, 'strategy.rebalance_bars': 8, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 1, 'strategy.long_frac': 0.1, 'label.horizon': 48}
+- sharpe 1.14 · dsr 0.59 · cagr 40.2% · mdd 37.1% · turnover 164x · fees 192.9% · funding -123.4% · long +86.3% / short +160.6% · ic 0.0308
+- failed gates: dsr, max_drawdown · sharpe 1.14 vs champion 1.82 (margin -0.68, need 0.15)
+
+## Round 2 conclusions (search around xs_ridge_1d_bn, 16 trials)
+
+- **Champion: `20261020-203642-57357f` (xs_ridge_1d_bn~s11.6)** — all gates pass: sharpe 1.82, DSR 0.926 (25 trials counted),
+  max DD 29.2%, CAGR 57.9%, 14/15 folds positive, turnover 167x, avg hold ~3.4 days, OOS IC 0.032.
+  Changes vs parent: label horizon 48 -> 96 (2 days), ridge alpha 100 -> 10, exit buffer 0.25 -> 0.35, no score smoothing.
+- Neighbour s11.7 (sharpe 1.56, DD 24.7%) is also strong -> the gain sits in a region (longer horizon + wide buffer), not a single lucky point.
+- Both legs now earn (long +262%, short +168% of capital gross); funding received +187%; fees -258% remain the largest cost.
+- Caveat: DSR barely clears 0.90 after 25 trials. Next step on the ladder is a budgeted holdout look (2025-10 .. 2026-09, includes the 2025-10-10 liquidation cascade).
