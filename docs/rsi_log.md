@@ -77,3 +77,15 @@ Auto-generated entries per run (HRN-08); add a `- conclusion:` line under each.
   so 1.27 is not yet distinguishable from luck (DSR 0.16). Next gains must be structural, not parameter luck.
 - Next: search around `xs_ridge_1d_bn` (horizon, rebalance, buffer, smoothing, breadth); then new low-turnover factors
   (funding-adjusted momentum, basis/funding divergence, residual momentum), and 5m-derived intrabar features as a separate test.
+
+### 20261020-193618-f9bc07 · xs_ridge_1d_bn~s11.0 · **fail**
+- date: 2026-10-20 19:36 · parent: xs_ridge_1d_bn · trials so far: 10
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 48, 'strategy.exit_buffer': 0.25, 'strategy.smooth_bars': 4, 'strategy.long_frac': 0.3, 'label.horizon': 48}
+- sharpe 0.72 · dsr 0.02 · cagr 17.7% · mdd 32.2% · turnover 114x · fees 84.5% · funding -60.9% · long -36.8% / short +116.6% · ic 0.0341
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
+
+### 20261020-193621-986b20 · xs_ridge_1d_bn~s12.0 · **fail**
+- date: 2026-10-20 19:36 · parent: xs_ridge_1d_bn · trials so far: 10
+- hypothesis: search around xs_ridge_1d_bn: {'model.ridge_alpha': 100.0, 'strategy.rebalance_bars': 16, 'strategy.exit_buffer': 0.35, 'strategy.smooth_bars': 12, 'strategy.long_frac': 0.3, 'label.horizon': 96}
+- sharpe 0.66 · dsr 0.01 · cagr 15.6% · mdd 35.4% · turnover 102x · fees 67.5% · funding -60.8% · long -24.6% / short +86.7% · ic 0.0357
+- failed gates: sharpe, dsr, max_drawdown · no incumbent
