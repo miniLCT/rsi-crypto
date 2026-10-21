@@ -89,7 +89,10 @@ def build_batch(panel: Panel, spec: FeatureSpec, mask: np.ndarray, use_cache: bo
         out[c] = v
         if p is not None:
             p.parent.mkdir(parents=True, exist_ok=True)
-            np.save(p, v)
+            import os
+            tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp.npy")
+            np.save(tmp, v)
+            tmp.replace(p)
             out[c] = np.load(p, mmap_mode="r")   # keep resident memory bounded; the OS pages it in
     for c in spec.columns():
         if "*" in c:

@@ -26,7 +26,7 @@ DEFAULT_LGBM = {
 
 
 class ModelSpec(BaseModel):
-    kind: Literal["lgbm", "ridge", "factor"] = "lgbm"
+    kind: Literal["lgbm", "ridge", "factor", "signs"] = "lgbm"
     params: dict = Field(default_factory=dict)
     num_boost_round: int = 400
     early_stopping: int = 50
@@ -141,6 +141,15 @@ class Model:
             self.importance = {c: float(abs(b)) for c, b in zip(cols, beta)}
         elif k == "factor":
             self.obj = {"w": np.array([self.spec.weights.get(c, 0.0) for c in cols])}
+        elif k == "signs":
+            # equal-weight combination; each column's sign estimated on the training window only
+            Xf = np.nan_to_num(np.asarray(X, dtype=np.float64))
+            Xf -= Xf.mean(0)
+            yc = y - y.mean()
+            corr = (Xf * yc[:, None]).sum(0) / (np.sqrt((Xf ** 2).sum(0) * (yc ** 2).sum()) + 1e-12)
+            w = np.where(np.abs(corr) >= self.spec.select_min_abs_ic, np.sign(corr), 0.0)
+            self.obj = {"w": w / max(np.abs(w).sum(), 1.0), "corr": corr}
+            self.importance = {c: float(v) for c, v in zip(cols, corr)}
         p = self._raw_predict(X)
         s = float(np.nanstd(p))
         self.pred_std = s if s > 0 else 1.0
@@ -159,7 +168,7 @@ class Model:
             for i in range(0, len(X), 200_000):
                 out[i:i + 200_000] = ((np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64)) - o["mu"]) / o["sd"]) @ o["beta"]
             return out
-        return np.nan_to_num(X.astype(np.float64)) @ self.obj["w"]
+        return np.nan_to_num(np.asarray(X, dtype=np.float64)) @ self.obj["w"]
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Score in units of training-prediction std (comparable across retrains). X has all `columns`."""

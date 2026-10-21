@@ -77,7 +77,8 @@ def compute_batch(panel: Panel, names: list[str], use_cache: bool = True) -> dic
         computed += 1
         if use_cache:
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp.npy")
+            import os
+            tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp.npy")
             np.save(tmp, arr)
             tmp.replace(p)
             arr = np.load(p, mmap_mode="r")

@@ -82,6 +82,14 @@ def cached_masks(panel: Panel, uspec) -> tuple[np.ndarray, np.ndarray]:
     return entry, hold
 
 
+def _atomic_save(p: Path, arr: np.ndarray) -> None:
+    """Concurrent runs share caches: never expose a half-written file."""
+    import os
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp.npy")
+    np.save(tmp, arr)
+    tmp.replace(p)
+
+
 def _compact_cols(panel: Panel, spec: ExperimentSpec, hold: np.ndarray, idx: np.ndarray) -> dict:
     """Model columns gathered to the hold-universe slots, cached on disk (~K/S of the full size)."""
     from rsi.config import cache_dir
@@ -100,9 +108,10 @@ def _compact_cols(panel: Panel, spec: ExperimentSpec, hold: np.ndarray, idx: np.
             if len(parts) == 2:   # interaction: compact xs column x compact regime column
                 from rsi.features.featureset import interaction
                 reg = np.take_along_axis(np.asarray(full[parts[1]]), idx, 1)
-                np.save(p, interaction(out[parts[0]], reg))
+                arr = interaction(out[parts[0]], reg)
             else:
-                np.save(p, np.take_along_axis(np.asarray(full[c]), idx, 1))
+                arr = np.take_along_axis(np.asarray(full[c]), idx, 1)
+            _atomic_save(p, arr)
         out[c] = np.load(p, mmap_mode="r")
     return out
 

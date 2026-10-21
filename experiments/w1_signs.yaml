@@ -1,0 +1,37 @@
+name: w1_signs
+hypothesis: Same 7 factors and weekly structure; each sign estimated inside each fold
+  on the training window only (equal weights, no magnitudes fitted).
+features:
+  include:
+  - ret_336
+  - ret_672
+  - ret_1344
+  - funding_avg_7d
+  - oi_chg_336
+  - smart_retail_div
+  - rv_336
+  transform: rank
+label:
+  clip: 5.0
+  horizon: 336
+  include_funding: true
+  vol_norm: true
+  xs_demean: true
+risk:
+  hold_horizon_bars: 336
+  max_weight: 0.05
+strategy:
+  beta_neutral: true
+  exit_buffer: 0.2
+  kind: xs_longshort
+  long_frac: 0.2
+  rebalance_bars: 336
+  short_frac: 0.2
+universe:
+  keep_rank: 120
+  kind: top_liquid
+  size: 100
+model:
+  kind: signs
+  train_stride: 8
+  select_min_abs_ic: 0.0

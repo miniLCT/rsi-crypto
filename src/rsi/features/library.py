@@ -19,7 +19,7 @@ def _ret(fv: FrameView, n: int) -> pd.DataFrame:
     return np.log(fv.close / fv.close.shift(n))
 
 
-for _n in (1, 2, 4, 8, 16, 48, 96, 336, 672):
+for _n in (1, 2, 4, 8, 16, 48, 96, 336, 672, 1344):
     register_partial(f"ret_{_n}", _ret, lookback=_n + 1, group="momentum", doc=f"log return over {_n} bars", n=_n)
 
 

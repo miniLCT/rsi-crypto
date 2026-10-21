@@ -1,0 +1,45 @@
+name: w1_prior
+hypothesis: 'Weekly, few-factor, no fitting. Signs fixed by economic prior before
+  seeing results: momentum 1/2/4w +, 7d funding carry -, 7d OI build-up -, smart-money
+  (top-trader vs crowd) long +, 7d realised vol -. Equal weights, weekly rebalance,
+  7d funding-inclusive horizon.'
+features:
+  include:
+  - ret_336
+  - ret_672
+  - ret_1344
+  - funding_avg_7d
+  - oi_chg_336
+  - smart_retail_div
+  - rv_336
+  transform: rank
+label:
+  clip: 5.0
+  horizon: 336
+  include_funding: true
+  vol_norm: true
+  xs_demean: true
+risk:
+  hold_horizon_bars: 336
+  max_weight: 0.05
+strategy:
+  beta_neutral: true
+  exit_buffer: 0.2
+  kind: xs_longshort
+  long_frac: 0.2
+  rebalance_bars: 336
+  short_frac: 0.2
+universe:
+  keep_rank: 120
+  kind: top_liquid
+  size: 100
+model:
+  kind: factor
+  weights:
+    r:ret_336: 1
+    r:ret_672: 1
+    r:ret_1344: 1
+    r:funding_avg_7d: -1
+    r:oi_chg_336: -1
+    r:smart_retail_div: 1
+    r:rv_336: -1

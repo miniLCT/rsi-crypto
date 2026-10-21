@@ -425,3 +425,38 @@ Next: feature-dropout robustness of the positioning variant before any holdout l
 - Refuted: trees, shorter/expanding/recency-weighted training, dispersion-based sizing, naive carry blending,
   positioning as extra columns. Kept as infrastructure: in-fold selection, ensembles, regime interactions,
   positioning data (archive + live), robustness check.
+
+### 20261021-161834-b89e3d · w1_signs · **fail**
+- date: 2026-10-21 16:18 · parent: - · trials so far: 39
+- hypothesis: Same 7 factors and weekly structure; each sign estimated inside each fold on the training window only (equal weights, no magnitudes fitted).
+- sharpe 0.06 · dsr 0.02 · cagr -2.4% · mdd 40.8% · turnover 39x · fees 20.6% · funding -58.0% · long -24.5% / short -6.5% · ic -0.0022
+- failed gates: sharpe, dsr, max_drawdown, fold_consistency · sharpe 0.06 vs champion 1.82 (margin -1.76, need 0.15)
+
+### 20261021-161834-75cfcb · w1_prior · **fail**
+- date: 2026-10-21 16:18 · parent: - · trials so far: 39
+- hypothesis: Weekly, few-factor, no fitting. Signs fixed by economic prior before seeing results: momentum 1/2/4w +, 7d funding carry -, 7d OI build-up -, smart-money (top-trader vs crowd) long +, 7d realised vol -. Equal weights, weekly rebalance, 7d funding-inclusive horizon.
+- sharpe 0.80 · dsr 0.24 · cagr 20.4% · mdd 48.1% · turnover 28x · fees 21.6% · funding -86.3% · long -14.5% / short +64.3% · ic 0.0277
+- failed gates: sharpe, dsr, max_drawdown · sharpe 0.80 vs champion 1.82 (margin -1.02, need 0.15)
+
+### 20261021-162218-8d5ecb · w1_ridge · **fail**
+- date: 2026-10-21 16:22 · parent: - · trials so far: 41
+- hypothesis: Control: same 7 factors and weekly structure, ridge weights fitted in-fold.
+- sharpe 0.35 · dsr 0.06 · cagr 6.0% · mdd 48.9% · turnover 34x · fees 19.9% · funding -98.3% · long -77.4% / short +70.2% · ic 0.0279
+- failed gates: sharpe, dsr, max_drawdown, fold_consistency · sharpe 0.35 vs champion 1.82 (margin -1.47, need 0.15)
+
+## Round 6 — weekly, few-factor family (hypothesis: lower frequency = more stable)
+
+7 pre-declared factors (momentum 1/2/4w, 7d funding carry, 7d OI build-up, smart-money divergence, 7d vol),
+7d funding-inclusive horizon, weekly rebalance (Thursday 00:00 UTC), beta-neutral legs.
+
+| variant | sharpe | max DD | note |
+|---|---|---|---|
+| prior signs, equal weight, no fit | 0.80 | 48.1% | IC 0.028, turnover 28x, funding +86%, short leg +64%, long -15% |
+| in-fold signs, equal weight | 0.06 | 40.8% | |
+| in-fold ridge | 0.35 | 48.9% | |
+
+- Refuted: the weekly family is not more robust here; it is worse than the 2-day family and has squeeze-driven
+  drawdowns near 50% at the harness vol target.
+- In-fold sign estimates show only carry is consistently signed across all 15 folds (-0.007..-0.030);
+  momentum weakly positive, OI build-up / vol flip sign, smart-money mostly positive (as the prior) but weak.
+- Infra fix: concurrent runs could read a half-written cache file -> all cache writes are now atomic (tmp + rename).
