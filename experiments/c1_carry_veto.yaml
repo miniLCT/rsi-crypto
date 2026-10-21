@@ -1,0 +1,32 @@
+features:
+  include:
+  - funding_avg_7d
+  transform: rank
+label:
+  horizon: 48
+model:
+  kind: factor
+  weights:
+    r:funding_avg_7d: -1.0
+risk:
+  hold_horizon_bars: 48
+  max_weight: 0.05
+strategy:
+  beta_neutral: true
+  exit_buffer: 0.2
+  kind: xs_longshort
+  long_frac: 0.2
+  rebalance_bars: 16
+  short_frac: 0.2
+  veto_feature: ret_336
+  short_veto_above: 0.2
+  long_veto_below: -0.2
+universe:
+  keep_rank: 120
+  kind: top_liquid
+  size: 100
+name: c1_carry_veto
+hypothesis: Squeezes hit shorts in names that just rallied; longs in low-funding names
+  are often falling knives. No new shorts in the top-30% 7d-momentum names, no new
+  longs in the bottom 30%.
+parent: xs_factor_carry_7d

@@ -295,7 +295,12 @@ class LiveRunner:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
                 regime = float(np.nanmedian(compute_last(win, [self.spec.strategy.exposure_feature])[self.spec.strategy.exposure_feature]))
-        w = self.builder.step(bar_no, score, uni, dvol, hold, beta, regime)
+        veto = None
+        if self.spec.strategy.veto_feature:
+            from rsi.features.engine import compute_last, xs_rank
+            raw = compute_last(win, [self.spec.strategy.veto_feature])[self.spec.strategy.veto_feature]
+            veto = xs_rank(raw[None, :], hold[None, :])[0].astype(np.float64)
+        w = self.builder.step(bar_no, score, uni, dvol, hold, beta, regime, veto)
         if self.trade_symbols is not None:
             w = np.where([s in self.trade_symbols for s in win.symbols], w, 0.0)
 

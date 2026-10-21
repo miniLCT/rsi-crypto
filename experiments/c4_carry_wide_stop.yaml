@@ -1,0 +1,29 @@
+features:
+  include:
+  - funding_avg_7d
+  transform: rank
+label:
+  horizon: 48
+model:
+  kind: factor
+  weights:
+    r:funding_avg_7d: -1.0
+risk:
+  hold_horizon_bars: 672
+  max_weight: 0.05
+strategy:
+  beta_neutral: true
+  exit_buffer: 0.2
+  kind: xs_longshort
+  long_frac: 0.2
+  rebalance_bars: 16
+  short_frac: 0.2
+universe:
+  keep_rank: 120
+  kind: top_liquid
+  size: 100
+name: c4_carry_wide_stop
+hypothesis: 'Hard stops were sized for a 1-day hold while carry positions live ~14
+  days: 24% of trades exited by stops, then re-entered. Size stops to the real holding
+  period (672 bars) so they only catch disasters (DEC-09).'
+parent: c0_carry

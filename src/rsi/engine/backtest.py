@@ -78,11 +78,18 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
     cols = np.flatnonzero(active)
     symbols = [panel.symbols[j] for j in cols]
     S = len(cols)
+    hold_full, mask_full = hold, mask
     o, h, lo, c, fr = (np.asarray(panel[f])[:, cols] for f in ("open", "high", "low", "close", "funding_rate"))
     adv, dvol, score, mask = adv[:, cols], dvol[:, cols], score[:, cols], mask[:, cols]
     hold = hold[:, cols] if hold is not None else None
     if strat.beta_neutral and beta is None:
         beta = beta_to_btc(panel)
+    veto = None
+    if strat.veto_feature:
+        from rsi.features.engine import compute_batch, xs_rank
+        vm = hold_full if hold_full is not None else mask_full
+        raw = np.asarray(compute_batch(panel, [strat.veto_feature])[strat.veto_feature])
+        veto = xs_rank(raw, vm)[:, cols]
     regime = None
     if strat.exposure_feature:
         from rsi.features.engine import compute_batch
@@ -111,7 +118,7 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
                 port.record_book_return(c[t] / c[t - 1] - 1)
             hrow = hold[t] if hold is not None else None
             w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow, beta[t] if beta is not None else None,
-                             regime[t] if regime is not None else None)
+                             regime[t] if regime is not None else None, veto[t] if veto is not None else None)
             q = port.target_qty(int(times[t] + step), bar_no, w, c[t], adv[t], dvol[t], mask[t])
             if t + 1 >= T or k == n - 1:
                 break

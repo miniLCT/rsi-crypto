@@ -86,7 +86,7 @@ def summarize(res, bars_per_year: int, n_trials: int = 1, trial_sr_var: float | 
         "avg_hold_bars": float(((tr["close_ms"] - tr["open_ms"]) / 1_800_000).mean()) if len(tr) else 0.0,
         "long_pnl_frac": float(tr.loc[tr["side"] > 0, "pnl_usd"].sum() / res.equity0) if len(tr) else 0.0,
         "short_pnl_frac": float(tr.loc[tr["side"] < 0, "pnl_usd"].sum() / res.equity0) if len(tr) else 0.0,
-        "stop_exits": int((tr["reason"] == "stop").sum()) if len(tr) else 0,
+        "stop_exits": int(tr["reason"].isin(["stop", "hard_stop"]).sum()) if len(tr) else 0,
         "days": int(len(dr)),
         "dsr": deflated_sharpe(dr.to_numpy(), n_trials, trial_sr_var),
         "daily_sr": float(dr.mean() / dr.std(ddof=1)) if len(dr) > 1 and dr.std() > 0 else 0.0,

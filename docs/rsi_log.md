@@ -460,3 +460,53 @@ Next: feature-dropout robustness of the positioning variant before any holdout l
 - In-fold sign estimates show only carry is consistently signed across all 15 folds (-0.007..-0.030);
   momentum weakly positive, OI build-up / vol flip sign, smart-money mostly positive (as the prior) but weak.
 - Infra fix: concurrent runs could read a half-written cache file -> all cache writes are now atomic (tmp + rename).
+
+### 20261021-203606-971b73 · c1_carry_veto · **fail**
+- date: 2026-10-21 20:36 · parent: xs_factor_carry_7d · trials so far: 42
+- hypothesis: Squeezes hit shorts in names that just rallied; longs in low-funding names are often falling knives. No new shorts in the top-30% 7d-momentum names, no new longs in the bottom 30%.
+- sharpe 0.20 · dsr 0.03 · cagr 1.8% · mdd 47.9% · turnover 46x · fees 22.7% · funding -118.2% · long -53.5% / short +33.2% · ic 0.0035
+- failed gates: sharpe, dsr, max_drawdown, fold_consistency · sharpe 0.20 vs champion 1.82 (margin -1.62, need 0.15)
+
+### 20261021-203606-a7a9dd · c0_carry · **fail**
+- date: 2026-10-21 20:36 · parent: xs_factor_carry_7d · trials so far: 42
+- hypothesis: Control: 7d funding carry, beta-neutral legs, current harness (fixed eval vol target, DEC defaults).
+- sharpe 0.70 · dsr 0.19 · cagr 16.5% · mdd 26.9% · turnover 44x · fees 33.5% · funding -192.6% · long -41.9% / short +72.8% · ic 0.0035
+- failed gates: sharpe, dsr · sharpe 0.70 vs champion 1.82 (margin -1.12, need 0.15)
+
+### 20261021-203607-ee81d5 · c3_carry_nobn · **fail**
+- date: 2026-10-21 20:36 · parent: xs_factor_carry_7d · trials so far: 42
+- hypothesis: Carry legs have asymmetric beta (crowded longs are high-beta alts); test whether forcing beta neutrality costs carry.
+- sharpe 0.75 · dsr 0.22 · cagr 18.0% · mdd 26.0% · turnover 43x · fees 32.6% · funding -181.9% · long -10.9% / short +49.7% · ic 0.0035
+- failed gates: sharpe, dsr · sharpe 0.75 vs champion 1.82 (margin -1.07, need 0.15)
+
+### 20261021-204639-1bb49a · c4_carry_wide_stop · **fail**
+- date: 2026-10-21 20:46 · parent: c0_carry · trials so far: 45
+- hypothesis: Hard stops were sized for a 1-day hold while carry positions live ~14 days: 24% of trades exited by stops, then re-entered. Size stops to the real holding period (672 bars) so they only catch disasters (DEC-09).
+- sharpe 0.74 · dsr 0.20 · cagr 17.6% · mdd 26.5% · turnover 38x · fees 29.9% · funding -196.8% · long -36.3% / short +75.7% · ic 0.0035
+- failed gates: sharpe, dsr · sharpe 0.74 vs champion 1.82 (margin -1.08, need 0.15)
+
+### 20261021-204639-ee5ad7 · c2_carry_fast · **fail**
+- date: 2026-10-21 20:46 · parent: xs_factor_carry_7d · trials so far: 45
+- hypothesis: Exit faster when crowding unwinds: add the last settled funding (weight 0.5) to the 7d average.
+- sharpe 0.36 · dsr 0.06 · cagr 6.3% · mdd 42.4% · turnover 51x · fees 32.5% · funding -166.9% · long -28.1% / short +37.4% · ic 0.0083
+- failed gates: sharpe, dsr, max_drawdown, fold_consistency · sharpe 0.36 vs champion 1.82 (margin -1.46, need 0.15)
+
+## Round 7 — carry-centred strategies
+
+| variant | sharpe | max DD | note |
+|---|---|---|---|
+| c0 carry (7d funding, beta-neutral) | 0.70 | 26.9% | control under current harness |
+| c1 + squeeze veto (no new shorts in top-30% 7d momentum, no new longs in bottom 30%) | 0.20 | 47.9% | funding received drops 193% -> 118%: the vetoed rallying high-funding names pay the most carry |
+| c2 + last settled funding (faster exit) | 0.36 | 42.4% | |
+| c3 without beta-neutral legs | 0.75 | 26.0% | |
+| c4 stops sized to the real ~14d hold | 0.74 | 26.5% | |
+
+- Design flaw found: `risk.hold_horizon_bars` (stop distance) was 48 while carry holds ~690 bars, so 24% of
+  carry trades were hard-stopped by noise (champion: 5%). Stop horizon must match the strategy's real holding period.
+  Metric fix: `stop_exits` now counts hard stops too.
+- Squeeze filtering and faster exits are refuted for carry; carry alone is ~0.7 in research.
+- Portfolio level (two separate books, risk parity, from the research equity curves): daily corr(forecast, carry) 0.24.
+  50/50: sharpe 1.55 (vs 1.72), max DD 22.9% (vs 29.3%), worst calendar year 1.17 (vs 0.67 for the forecast alone;
+  2023: forecast 0.67, carry 1.16). In the holdout the carry income survived while the forecast faded, so a
+  multi-book portfolio is the most promising robust structure. Proposed next: multi-book support in the harness
+  (netted execution, book-level risk parity, multi-model export), then robustness + a holdout look.

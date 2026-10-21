@@ -1,0 +1,30 @@
+features:
+  include:
+  - funding_avg_7d
+  - funding_last
+  transform: rank
+label:
+  horizon: 48
+model:
+  kind: factor
+  weights:
+    r:funding_avg_7d: -1.0
+    r:funding_last: -0.5
+risk:
+  hold_horizon_bars: 48
+  max_weight: 0.05
+strategy:
+  beta_neutral: true
+  exit_buffer: 0.2
+  kind: xs_longshort
+  long_frac: 0.2
+  rebalance_bars: 16
+  short_frac: 0.2
+universe:
+  keep_rank: 120
+  kind: top_liquid
+  size: 100
+name: c2_carry_fast
+hypothesis: 'Exit faster when crowding unwinds: add the last settled funding (weight
+  0.5) to the 7d average.'
+parent: xs_factor_carry_7d

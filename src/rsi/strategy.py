@@ -27,6 +27,10 @@ class StrategySpec(BaseModel):
     smooth_bars: int = 1              # score = mean of the last k bar scores (finite memory, turnover control)
     min_abs_score: float = 0.0        # xs: names whose |score - median| is below this are not entered
     beta_neutral: bool = False        # xs: rescale the two legs so that sum(w * beta_btc) = 0 at constant gross
+    # entry veto on a feature's universe rank in [-0.5, 0.5] (existing positions are unaffected)
+    veto_feature: str | None = None
+    short_veto_above: float | None = None   # no new shorts in names ranked above this (e.g. strong recent rally)
+    long_veto_below: float | None = None    # no new longs in names ranked below this (falling knives)
     exposure_feature: str | None = None   # broadcast regime feature (log-ratio scale) that sizes the book
     exposure_power: float = 1.0           # gross *= clip(exp(power * value), lo, hi)
     exposure_clip: tuple[float, float] = (0.5, 1.5)
@@ -57,7 +61,8 @@ class TargetBuilder:
         return bar_number % self.spec.rebalance_bars == 0
 
     def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None,
-             hold: np.ndarray | None = None, beta: np.ndarray | None = None, regime: float | None = None) -> np.ndarray:
+             hold: np.ndarray | None = None, beta: np.ndarray | None = None, regime: float | None = None,
+             veto: np.ndarray | None = None) -> np.ndarray:
         """score/mask/vol/hold: [S] rows for the decision bar. Returns target weights [S].
 
         `mask` = names that may be entered; `hold` (superset) = names an existing position may stay in.
@@ -74,7 +79,7 @@ class TargetBuilder:
                 entry &= np.abs(score - np.nanmedian(score[entry])) >= self.spec.min_abs_score
             keep = hold & held & ok
             if self.spec.kind == "xs_longshort":
-                w = self._xs(score, entry, keep, vol)
+                w = self._xs(score, entry, keep, vol, veto)
                 if self.spec.beta_neutral and beta is not None:
                     w = self._beta_neutral(w, beta)
                 w = w * self.exposure_scale(regime)
@@ -84,7 +89,8 @@ class TargetBuilder:
         return w
 
     # ------------------------------------------------------------------ cross-sectional
-    def _xs(self, score: np.ndarray, entry: np.ndarray, keep: np.ndarray, vol: np.ndarray | None) -> np.ndarray:
+    def _xs(self, score: np.ndarray, entry: np.ndarray, keep: np.ndarray, vol: np.ndarray | None,
+            veto: np.ndarray | None = None) -> np.ndarray:
         sp = self.spec
         w = np.zeros_like(score, dtype=np.float64)
         alive = entry | keep
@@ -106,7 +112,14 @@ class TargetBuilder:
             held = np.flatnonzero((np.sign(self.prev) == sign) & keep & (r <= frac + sp.exit_buffer))
             held = held[np.argsort(r[held])][:k]
             held_set = set(held.tolist())
-            cand = [i for i in np.argsort(np.where(entry, r, np.inf)) if entry[i] and i not in held_set]
+            allowed = entry.copy()
+            if veto is not None:
+                v = np.where(np.isfinite(veto), veto, 0.0)
+                if sign < 0 and sp.short_veto_above is not None:
+                    allowed &= v <= sp.short_veto_above
+                if sign > 0 and sp.long_veto_below is not None:
+                    allowed &= v >= sp.long_veto_below
+            cand = [i for i in np.argsort(np.where(allowed, r, np.inf)) if allowed[i] and i not in held_set]
             chosen = list(held) + cand[: k - len(held)]
             chosen = np.array(chosen, dtype=int)
             if sp.weighting == "score":
