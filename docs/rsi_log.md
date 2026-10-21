@@ -263,3 +263,86 @@ Conclusions
 - Next: new information rather than new plumbing — positioning data (open interest, top-trader and taker
   long/short ratios from the `metrics` archive), market-wide state (breadth, aggregate funding, dispersion; DEC-03)
   as regime conditioners, and 5m intrabar features.
+
+### 20261021-120124-c9bdf9 · r4_disp_scale · **fail**
+- date: 2026-10-21 12:01 · parent: 20261020-203642-57357f · trials so far: 32
+- hypothesis: The xs edge is strong in high-dispersion regimes (2022, 2025) and weak in low-dispersion ones (2023-24, holdout) while costs stay constant: size the book by current dispersion vs its 30d median.
+- sharpe 1.11 · dsr 0.49 · cagr 28.4% · mdd 29.4% · turnover 198x · fees 159.9% · funding -94.0% · long +64.7% / short +91.6% · ic 0.0318
+- failed gates: dsr · sharpe 1.11 vs champion 1.82 (margin -0.71, need 0.15)
+
+### 20261021-121857-2084da · r4_regime_lgbm · **fail**
+- date: 2026-10-21 12:18 · parent: 20261020-203642-57357f · trials so far: 33
+- hypothesis: Trees can condition on regime directly: rank features plus raw market-state features, heavily regularised, corr early stopping.
+- sharpe -0.21 · dsr 0.01 · cagr -7.8% · mdd 57.0% · turnover 142x · fees 62.4% · funding -12.6% · long -123.1% / short +69.1% · ic 0.0170
+- failed gates: sharpe, dsr, max_drawdown, fold_consistency · sharpe -0.21 vs champion 1.82 (margin -2.03, need 0.15)
+
+### 20261021-122024-ca6ea0 · r4_control_89 · **fail**
+- date: 2026-10-21 12:20 · parent: 20261020-203642-57357f · trials so far: 33
+- hypothesis: Control: champion spec unchanged; the feature selector now also picks up the 7 new broadcast market-state columns.
+- sharpe 1.35 · dsr 0.66 · cagr 38.7% · mdd 30.6% · turnover 171x · fees 165.1% · funding -119.4% · long +98.1% / short +144.6% · ic 0.0318
+- failed gates: dsr, max_drawdown · sharpe 1.35 vs champion 1.82 (margin -0.46, need 0.15)
+
+### 20261021-122503-0abcb3 · r4_regime_interact · **fail**
+- date: 2026-10-21 12:25 · parent: 20261020-203642-57357f · trials so far: 35
+- hypothesis: Let the linear model condition each factor on the regime: add factor x dispersion-ratio and factor x aggregate-funding-z interactions.
+- sharpe 1.44 · dsr 0.71 · cagr 43.1% · mdd 28.9% · turnover 236x · fees 334.8% · funding -144.3% · long +147.6% / short +140.2% · ic 0.0346
+- failed gates: dsr · sharpe 1.44 vs champion 1.82 (margin -0.38, need 0.15)
+
+## Round 4 — market-state (regime) information (DEC-03)
+
+New broadcast features over the 120 most liquid names (identical in research and live panels):
+`mkt_breadth_48`, `mkt_ret_48`, `xs_disp_48`, `xs_disp_ratio`, `mkt_funding`, `mkt_funding_z`, `btc_rv_336`.
+Broadcast columns cannot rank coins, so regime enters via (a) exposure scaling, (b) factor x regime interactions, (c) trees.
+
+| variant | sharpe | max DD | note |
+|---|---|---|---|
+| champion (82 cols) | 1.82 | 29.2% | |
+| control: champion + 7 broadcast cols | 1.35 | 30.6% | selector `all` picked them up; nothing else changed |
+| factor x (dispersion, aggregate funding) | 1.44 | 28.9% | +0.09 vs control: noise level |
+| exposure scaled by dispersion ratio | 1.11 | 29.4% | worse |
+| LightGBM with regime features | -0.21 | 57.0% | trees fail again |
+
+- Hypothesis refuted: corr(fold sharpe, quarter mean dispersion) = 0.02. Dispersion does not explain the regime dependence.
+- Key finding: adding 7 near-irrelevant columns moves the champion from 1.82 to 1.35. The champion is a sharp peak
+  (selection luck), consistent with the holdout failure. Harness gap closed: new `rsi robust` (feature-dropout
+  re-runs, excluded from DSR trial counts) is now a required step before any holdout look.
+
+### 20261021-130643-0f3777 · xs_ridge_1d_bn~s11.6~robust0 · **fail**
+- date: 2026-10-21 13:06 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.77 · dsr 0.86 · cagr 55.7% · mdd 28.3% · turnover 169x · fees 205.6% · funding -145.2% · long +222.8% / short +195.0% · ic 0.0328
+- failed gates: dsr · sharpe 1.77 vs champion 1.82 (margin -0.05, need 0.15)
+
+### 20261021-130644-0707f4 · xs_ridge_1d_bn~s11.6~robust0 · **fail**
+- date: 2026-10-21 13:06 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.11 · dsr 0.47 · cagr 30.6% · mdd 32.8% · turnover 203x · fees 177.0% · funding -103.4% · long +44.6% / short +123.8% · ic 0.0327
+- failed gates: dsr, max_drawdown · sharpe 1.11 vs champion 1.82 (margin -0.70, need 0.15)
+
+### 20261021-131507-c75d88 · xs_ridge_1d_bn~s11.6~robust1 · **fail**
+- date: 2026-10-21 13:15 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.65 · dsr 0.86 · cagr 50.9% · mdd 23.0% · turnover 187x · fees 234.1% · funding -135.0% · long +108.2% / short +250.7% · ic 0.0320
+- failed gates: dsr · sharpe 1.65 vs champion 1.82 (margin -0.17, need 0.15)
+
+### 20261021-131508-f606d7 · xs_ridge_1d_bn~s11.6~robust1 · **fail**
+- date: 2026-10-21 13:15 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.43 · dsr 0.69 · cagr 42.5% · mdd 34.6% · turnover 195x · fees 189.7% · funding -104.9% · long +129.0% / short +144.3% · ic 0.0310
+- failed gates: dsr, max_drawdown · sharpe 1.43 vs champion 1.82 (margin -0.38, need 0.15)
+
+### 20261021-132330-78ea10 · xs_ridge_1d_bn~s11.6~robust2 · **fail**
+- date: 2026-10-21 13:23 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.67 · dsr 0.84 · cagr 51.3% · mdd 26.0% · turnover 162x · fees 186.8% · funding -139.7% · long +98.1% / short +254.7% · ic 0.0349
+- failed gates: dsr · sharpe 1.67 vs champion 1.82 (margin -0.15, need 0.15)
+
+### 20261021-132331-422a70 · xs_ridge_1d_bn~s11.6~robust2 · **fail**
+- date: 2026-10-21 13:23 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: robustness: 15% feature dropout of 20261020-203642-57357f
+- sharpe 1.40 · dsr 0.68 · cagr 40.4% · mdd 33.9% · turnover 164x · fees 156.9% · funding -107.7% · long +22.8% / short +226.2% · ic 0.0327
+- failed gates: dsr, max_drawdown · sharpe 1.40 vs champion 1.82 (margin -0.42, need 0.15)
+- Robustness of champion 20261020-203642-57357f (6 re-runs, 15% feature dropout, 2 seeds):
+  sharpe [1.77, 1.65, 1.67, 1.11, 1.43, 1.40] -> median 1.54, min 1.11; max DD median 30.4% (gate 30%) -> borderline FAIL.
+  Reading: a real research-period edge (~1.5) exists and survives feature dropout, but the reported 1.82 carries
+  ~0.3 of selection optimism. The holdout drop (0.41) is a second, separate problem: decay over time, not feature luck.

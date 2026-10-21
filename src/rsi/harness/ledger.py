@@ -73,7 +73,8 @@ class Ledger:
         rows = self.runs(harness_version)
         seen, srs = set(), []
         for r in rows:
-            if r["spec_hash"] in seen or r["daily_sr"] is None:
+            # robustness re-evaluations perturb a chosen candidate; they are not selection trials
+            if r["spec_hash"] in seen or r["daily_sr"] is None or r["status"] == "robustness":
                 continue
             seen.add(r["spec_hash"])
             srs.append(r["daily_sr"])

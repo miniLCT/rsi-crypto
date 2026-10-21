@@ -112,11 +112,23 @@ class Model:
             tot = gain.sum() or 1.0
             self.importance = {c: float(g / tot) for c, g in zip(cols, gain)}
         elif k == "ridge":
-            Xf = np.nan_to_num(X.astype(np.float64))
-            mu, sd = Xf.mean(0), Xf.std(0) + 1e-12
-            Z = (Xf - mu) / sd
-            A = Z.T @ Z + self.spec.ridge_alpha * len(Z) * 1e-3 * np.eye(Z.shape[1])
-            beta = np.linalg.solve(A, Z.T @ y)
+            # chunked normal equations: memory stays ~ one chunk regardless of rows x columns
+            n, F = X.shape
+            s1, s2 = np.zeros(F), np.zeros(F)
+            for i in range(0, n, 200_000):
+                c = np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64))
+                s1 += c.sum(0)
+                s2 += (c * c).sum(0)
+            mu = s1 / n
+            sd = np.sqrt(np.maximum(s2 / n - mu * mu, 0)) + 1e-12
+            A = np.zeros((F, F))
+            b = np.zeros(F)
+            for i in range(0, n, 200_000):
+                Z = (np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64)) - mu) / sd
+                A += Z.T @ Z
+                b += Z.T @ y[i:i + 200_000]
+            A += self.spec.ridge_alpha * n * 1e-3 * np.eye(F)
+            beta = np.linalg.solve(A, b)
             self.obj = {"mu": mu, "sd": sd, "beta": beta}
             self.importance = {c: float(abs(b)) for c, b in zip(cols, beta)}
         elif k == "factor":
@@ -134,8 +146,11 @@ class Model:
         if k == "lgbm":
             return self.obj.predict(X, num_iteration=self.best_iter, num_threads=self.spec.params.get("num_threads", 16))
         if k == "ridge":
-            Z = (np.nan_to_num(X.astype(np.float64)) - self.obj["mu"]) / self.obj["sd"]
-            return Z @ self.obj["beta"]
+            o = self.obj
+            out = np.empty(len(X))
+            for i in range(0, len(X), 200_000):
+                out[i:i + 200_000] = ((np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64)) - o["mu"]) / o["sd"]) @ o["beta"]
+            return out
         return np.nan_to_num(X.astype(np.float64)) @ self.obj["w"]
 
     def predict(self, X: np.ndarray) -> np.ndarray:

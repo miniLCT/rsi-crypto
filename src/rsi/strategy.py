@@ -27,6 +27,9 @@ class StrategySpec(BaseModel):
     smooth_bars: int = 1              # score = mean of the last k bar scores (finite memory, turnover control)
     min_abs_score: float = 0.0        # xs: names whose |score - median| is below this are not entered
     beta_neutral: bool = False        # xs: rescale the two legs so that sum(w * beta_btc) = 0 at constant gross
+    exposure_feature: str | None = None   # broadcast regime feature (log-ratio scale) that sizes the book
+    exposure_power: float = 1.0           # gross *= clip(exp(power * value), lo, hi)
+    exposure_clip: tuple[float, float] = (0.5, 1.5)
     # ts_directional
     entry_z: float = 1.0
     exit_z: float = 0.25
@@ -54,7 +57,7 @@ class TargetBuilder:
         return bar_number % self.spec.rebalance_bars == 0
 
     def step(self, bar_number: int, score: np.ndarray, mask: np.ndarray, vol: np.ndarray | None = None,
-             hold: np.ndarray | None = None, beta: np.ndarray | None = None) -> np.ndarray:
+             hold: np.ndarray | None = None, beta: np.ndarray | None = None, regime: float | None = None) -> np.ndarray:
         """score/mask/vol/hold: [S] rows for the decision bar. Returns target weights [S].
 
         `mask` = names that may be entered; `hold` (superset) = names an existing position may stay in.
@@ -74,6 +77,7 @@ class TargetBuilder:
                 w = self._xs(score, entry, keep, vol)
                 if self.spec.beta_neutral and beta is not None:
                     w = self._beta_neutral(w, beta)
+                w = w * self.exposure_scale(regime)
             else:
                 w = self._ts(score, entry, keep)
         self.prev = w
@@ -114,6 +118,13 @@ class TargetBuilder:
             side_gross = sp.gross / len(sides)
             w[chosen] = sign * side_gross * raw / raw.sum()
         return w
+
+    def exposure_scale(self, regime: float | None) -> float:
+        sp = self.spec
+        if sp.exposure_feature is None or regime is None or not np.isfinite(regime):
+            return 1.0
+        lo, hi = sp.exposure_clip
+        return float(np.clip(np.exp(sp.exposure_power * regime), lo, hi))
 
     def _beta_neutral(self, w: np.ndarray, beta: np.ndarray) -> np.ndarray:
         b = np.where(np.isfinite(beta), np.clip(beta, 0.1, 3.0), 1.0)

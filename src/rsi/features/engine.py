@@ -33,7 +33,7 @@ ANCHORS = ("BTCUSDT",)   # market-context features read these columns, so every 
 def _compute_chunked(panel: Panel, names: list[str]) -> dict[str, np.ndarray]:
     """Compute features chunk-by-chunk over symbols to bound memory; exact because features only
     combine a symbol's own history with the anchor columns."""
-    if panel.S <= CHUNK:
+    if panel.S <= CHUNK or any(registry.get(n).all_columns for n in names):
         fv = FrameView(panel)
         return {n: registry.get(n).compute(fv).astype(DTYPE) for n in names}
     out = {n: np.full((panel.T, panel.S), np.nan, dtype=DTYPE) for n in names}

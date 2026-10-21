@@ -22,6 +22,7 @@ class FeatureSpec(BaseModel):
     include: list[str] = Field(default_factory=lambda: ["all"])
     transform: Literal["raw", "rank", "zscore", "both"] = "rank"
     neutralize: bool = False      # residualise cross-sectional columns on (vol, size) each bar
+    interact: list[str] = Field(default_factory=list)   # broadcast regime features; adds <xs col>*<regime> columns
 
     def base_names(self) -> list[str]:
         return registry.resolve(self.include)
@@ -38,12 +39,15 @@ class FeatureSpec(BaseModel):
                 cols.append(n)
             if not bc:
                 cols += [f"{p}:{n}" for p in self._xs_prefix()]
+        xs = [c for c in cols if ":" in c]
+        cols += [f"{c}*{g}" for g in self.interact for c in xs]
         return cols
 
     def compute_names(self) -> list[str]:
         names = self.base_names()
         if self.neutralize:
             names = names + [c for c in NEUTRAL_CONTROLS if c not in names]
+        names = names + [g for g in self.interact if g not in names]
         return names
 
     def lookback(self) -> int:
@@ -59,12 +63,14 @@ def _controls(base: dict, mask: np.ndarray, kind: str) -> list[np.ndarray]:
 
 
 def build_batch(panel: Panel, spec: FeatureSpec, mask: np.ndarray, use_cache: bool = True,
-                mask_key: str | None = None) -> dict[str, np.ndarray]:
+                mask_key: str | None = None, interactions: bool = True) -> dict[str, np.ndarray]:
     """`mask_key` identifies the universe mask (e.g. a hash of the universe spec) for caching transforms."""
     base = engine.compute_batch(panel, spec.compute_names(), use_cache=use_cache)
     out: dict[str, np.ndarray] = {}
     ctrl: dict[str, list] = {}
     for c in spec.columns():
+        if "*" in c:
+            continue
         if ":" not in c:
             out[c] = base[c]
             continue
@@ -85,7 +91,17 @@ def build_batch(panel: Panel, spec: FeatureSpec, mask: np.ndarray, use_cache: bo
             p.parent.mkdir(parents=True, exist_ok=True)
             np.save(p, v)
             out[c] = np.load(p, mmap_mode="r")   # keep resident memory bounded; the OS pages it in
+    for c in spec.columns():
+        if "*" in c:
+            out[c.split("*")[1]] = base[c.split("*")[1]]
+            if interactions:
+                out[c] = interaction(out[c.split("*")[0]], base[c.split("*")[1]])
     return out
+
+
+def interaction(xs_col: np.ndarray, regime_col: np.ndarray) -> np.ndarray:
+    """xs column x broadcast regime value (regime taken as the row median, i.e. the broadcast value)."""
+    return (np.asarray(xs_col, dtype=np.float32) * np.asarray(regime_col, dtype=np.float32)).astype(engine.DTYPE)
 
 
 def build_last(window: Panel, spec: FeatureSpec, mask_last: np.ndarray) -> dict[str, np.ndarray]:
@@ -95,6 +111,8 @@ def build_last(window: Panel, spec: FeatureSpec, mask_last: np.ndarray) -> dict[
     out: dict[str, np.ndarray] = {}
     ctrl: dict[str, list] = {}
     for c in spec.columns():
+        if "*" in c:
+            continue
         if ":" not in c:
             out[c] = base[c]
             continue
@@ -105,6 +123,9 @@ def build_last(window: Panel, spec: FeatureSpec, mask_last: np.ndarray) -> dict[
                 ctrl[prefix[0]] = [_transform(prefix[0], base[k][None, :], m) for k in NEUTRAL_CONTROLS]
             v = engine.xs_neutralize(v, ctrl[prefix[0]], m)
         out[c] = v[0]
+    for c in spec.columns():
+        if "*" in c:
+            out[c] = interaction(out[c.split("*")[0]], base[c.split("*")[1]])
     return out
 
 

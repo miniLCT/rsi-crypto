@@ -1,0 +1,81 @@
+name: r4_control_89
+hypothesis: 'Control: champion spec unchanged; the feature selector now also picks
+  up the 7 new broadcast market-state columns.'
+parent: 20261020-203642-57357f
+universe:
+  kind: top_liquid
+  size: 100
+  keep_rank: 120
+  adv_days: 30
+  min_history_days: 30
+  symbols: []
+features:
+  include:
+  - all
+  - -group:calendar
+  transform: rank
+  neutralize: false
+label:
+  horizon: 96
+  kind: fwd_logret
+  xs_demean: true
+  vol_norm: true
+  include_funding: true
+  vol_window: 336
+  clip: 5.0
+model:
+  kind: ridge
+  params: {}
+  num_boost_round: 400
+  early_stopping: 50
+  early_stop_metric: corr
+  valid_frac: 0.15
+  train_stride: 4
+  ridge_alpha: 10.0
+  weights: {}
+  seed: 7
+strategy:
+  kind: xs_longshort
+  rebalance_bars: 8
+  gross: 1.0
+  allow_long: true
+  allow_short: true
+  long_frac: 0.2
+  short_frac: 0.2
+  exit_buffer: 0.35
+  weighting: equal
+  min_names: 10
+  smooth_bars: 1
+  min_abs_score: 0.0
+  beta_neutral: true
+  entry_z: 1.0
+  exit_z: 0.25
+  max_names: 10
+risk:
+  max_gross: 3.0
+  exchange_leverage: 3.0
+  margin_usage_max: 0.6
+  maint_margin_rate: 0.01
+  max_weight: 0.05
+  max_net: 1.0
+  vol_target: 0.3
+  vol_lookback: 672
+  vol_scale_min: 0.25
+  vol_scale_max: 4.0
+  hold_horizon_bars: 48
+  hard_stop_vol: 4.5
+  stop_loss_vol: null
+  trail_start_vol: null
+  trail_giveback_vol: 1.0
+  max_hold_bars: null
+  cooldown_bars: 16
+  dd_reduce: null
+  dd_reduce_scale: 0.5
+  dd_halt: null
+  dd_halt_bars: 336
+  daily_loss_halt: null
+  adv_cap: 0.02
+  min_trade_frac: 0.25
+  min_notional_usd: 10.0
+panel_top_k: 150
+test_months: null

@@ -87,14 +87,20 @@ def _compact_cols(panel: Panel, spec: ExperimentSpec, hold: np.ndarray, idx: np.
     ukey = stable_hash(spec.universe.model_dump())
     d = cache_dir() / "features" / panel.fingerprint / f"compact-{ukey}"
     out, full = {}, None
-    for c in spec.features.columns():
-        base = c.split(":", 1)[-1]
-        p = d / f"{c.replace(':', '__')}-{registry.get(base).src_hash}-{int(spec.features.neutralize)}.npy"
+    for c in [c for c in spec.features.columns() if "*" not in c] + [c for c in spec.features.columns() if "*" in c]:
+        parts = c.split("*")
+        hashes = "-".join(registry.get(x.split(":", 1)[-1]).src_hash for x in parts)
+        p = d / f"{c.replace(':', '__').replace('*', '_x_')}-{hashes}-{int(spec.features.neutralize)}.npy"
         if not p.exists():
             if full is None:
-                full = build_batch(panel, spec.features, hold, mask_key=ukey)
+                full = build_batch(panel, spec.features, hold, mask_key=ukey, interactions=False)
             d.mkdir(parents=True, exist_ok=True)
-            np.save(p, np.take_along_axis(np.asarray(full[c]), idx, 1))
+            if len(parts) == 2:   # interaction: compact xs column x compact regime column
+                from rsi.features.featureset import interaction
+                reg = np.take_along_axis(np.asarray(full[parts[1]]), idx, 1)
+                np.save(p, interaction(out[parts[0]], reg))
+            else:
+                np.save(p, np.take_along_axis(np.asarray(full[c]), idx, 1))
         out[c] = np.load(p, mmap_mode="r")
     return out
 

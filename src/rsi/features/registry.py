@@ -73,6 +73,7 @@ class Feature:
     lookback: int
     group: str
     doc: str = ""
+    all_columns: bool = False   # aggregates across symbols: must be computed on the whole panel at once
 
     def compute(self, fv: FrameView) -> np.ndarray:
         out = self.fn(fv)
@@ -99,11 +100,11 @@ REGISTRY: dict[str, Feature] = {}
 NON_SIGNAL_GROUPS = {"size"}
 
 
-def register(name: str, lookback: int, group: str, doc: str = ""):
+def register(name: str, lookback: int, group: str, doc: str = "", all_columns: bool = False):
     def deco(fn):
         if name in REGISTRY:
             raise ValueError(f"duplicate feature {name}")
-        REGISTRY[name] = Feature(name, fn, int(lookback), group, doc)
+        REGISTRY[name] = Feature(name, fn, int(lookback), group, doc, all_columns)
         return fn
     return deco
 

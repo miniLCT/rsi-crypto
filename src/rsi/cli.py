@@ -143,6 +143,13 @@ def search(spec_path: Path, n: int = 10, seed: int = 0):
 
 
 @app.command()
+def robust(run_id: str, n: int = 6, drop: float = 0.15, seed: int = 0):
+    """Feature-dropout robustness check; required before spending a holdout look."""
+    from rsi.harness.robust import robustness
+    console.print(robustness(run_id, n, drop, seed))
+
+
+@app.command()
 def holdout(run_id: str, force: bool = False):
     """Budgeted, logged evaluation on the locked holdout period."""
     from rsi.harness.release import holdout as do_holdout

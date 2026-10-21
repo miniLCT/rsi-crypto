@@ -376,3 +376,73 @@ def _bars_to_funding(fv: FrameView) -> pd.DataFrame:
 @register("age_30d", lookback=1440, group="calendar", doc="fraction of last 30d the contract traded (new listings < 1)")
 def _age(fv: FrameView) -> pd.DataFrame:
     return fv.close.notna().astype(float).rolling(1440, min_periods=1).mean()
+
+
+# ---------------------------------------------------------------- market state (DEC-03), broadcast to all symbols
+# Aggregates use the 120 most liquid names by 30d quote volume, a set both the research panel and the live
+# panel contain in full, so the values are identical in research and production.
+MKT_K = 120
+
+
+def _liquid(fv: FrameView) -> pd.DataFrame:
+    def f():
+        adv = fv.quote_volume.rolling(1440, min_periods=1368).mean()
+        r = adv.rank(axis=1, ascending=False, method="first")
+        return (r <= MKT_K) & fv.close.notna()
+    return fv.memo("_liquid", f)
+
+
+def _ret_n(fv: FrameView, n: int) -> pd.DataFrame:
+    return fv.memo(f"_ret_{n}", lambda: np.log(fv.close / fv.close.shift(n)))
+
+
+@register("mkt_breadth_48", lookback=1440 + 49, group="market_ctx", all_columns=True,
+          doc="share of liquid names up over 1d")
+def _mkt_breadth(fv: FrameView) -> pd.DataFrame:
+    r, m = _ret_n(fv, 48), _liquid(fv)
+    up = ((r > 0) & m).sum(axis=1)
+    n = (r.notna() & m).sum(axis=1)
+    return fv.broadcast((up / n.where(n > 0)) - 0.5)
+
+
+@register("mkt_ret_48", lookback=1440 + 49, group="market_ctx", all_columns=True, doc="equal-weight 1d return, liquid names")
+def _mkt_ret(fv: FrameView) -> pd.DataFrame:
+    r = _ret_n(fv, 48).where(_liquid(fv))
+    return fv.broadcast(r.mean(axis=1))
+
+
+def _disp(fv: FrameView, n: int) -> pd.Series:
+    return fv.memo(f"_disp_{n}", lambda: _ret_n(fv, n).where(_liquid(fv)).std(axis=1).to_frame("d"))["d"]
+
+
+@register("xs_disp_48", lookback=1440 + 49, group="market_ctx", all_columns=True,
+          doc="cross-sectional std of 1d returns (opportunity set of xs strategies)")
+def _xs_disp(fv: FrameView) -> pd.DataFrame:
+    return fv.broadcast(_disp(fv, 48))
+
+
+@register("xs_disp_ratio", lookback=1440 + 1440 + 49, group="market_ctx", all_columns=True,
+          doc="1d dispersion vs its own 30d median (log)")
+def _xs_disp_ratio(fv: FrameView) -> pd.DataFrame:
+    d = _disp(fv, 48)
+    return fv.broadcast(np.log(d / d.rolling(1440, min_periods=720).median()))
+
+
+@register("mkt_funding", lookback=1440 + 48, group="market_ctx", all_columns=True,
+          doc="median hourly funding across liquid names (aggregate leverage/crowding)")
+def _mkt_funding(fv: FrameView) -> pd.DataFrame:
+    return fv.broadcast(_funding_1h(fv).where(_liquid(fv)).median(axis=1))
+
+
+@register("mkt_funding_z", lookback=1440 + 48 + 336, group="market_ctx", all_columns=True,
+          doc="aggregate funding vs its 7d mean/std")
+def _mkt_funding_z(fv: FrameView) -> pd.DataFrame:
+    f = _funding_1h(fv).where(_liquid(fv)).median(axis=1)
+    sd = f.rolling(336, min_periods=168).std()
+    return fv.broadcast((f - f.rolling(336, min_periods=168).mean()) / sd.where(sd > 1e-9))
+
+
+@register("btc_rv_336", lookback=337, group="market_ctx", doc="BTC 7d realised vol")
+def _btc_rv_336(fv: FrameView) -> pd.DataFrame:
+    c = fv.column("close", BTC)
+    return fv.broadcast(np.log(c).diff().rolling(336, min_periods=336).std())

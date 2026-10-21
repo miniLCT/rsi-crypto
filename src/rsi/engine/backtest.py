@@ -83,6 +83,11 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
     hold = hold[:, cols] if hold is not None else None
     if strat.beta_neutral and beta is None:
         beta = beta_to_btc(panel)
+    regime = None
+    if strat.exposure_feature:
+        from rsi.features.engine import compute_batch
+        regime = np.nanmedian(np.asarray(compute_batch(panel, [strat.exposure_feature])[strat.exposure_feature],
+                                         dtype=np.float64), axis=1)
     beta = beta[:, cols] if beta is not None else None
     port = Portfolio(symbols, equity0, costs, risk, bars_per_year, step)
     builder = TargetBuilder(strat, S)
@@ -105,7 +110,8 @@ def run_backtest(panel: Panel, score: np.ndarray, mask: np.ndarray, strat: Strat
             if t > 0:
                 port.record_book_return(c[t] / c[t - 1] - 1)
             hrow = hold[t] if hold is not None else None
-            w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow, beta[t] if beta is not None else None)
+            w = builder.step(bar_no, score[t], mask[t], dvol[t], hrow, beta[t] if beta is not None else None,
+                             regime[t] if regime is not None else None)
             q = port.target_qty(int(times[t] + step), bar_no, w, c[t], adv[t], dvol[t], mask[t])
             if t + 1 >= T or k == n - 1:
                 break

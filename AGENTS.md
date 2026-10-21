@@ -49,7 +49,8 @@ Every candidate counts as a trial, so a lucky search winner is deflated accordin
 
 ## Promotion ladder
 
-research champion → `rsi holdout <run_id>` (max 3 looks / 30 days, all logged)
+research champion → `rsi robust <run_id>` (feature-dropout re-runs; median must still pass the gates)
+→ `rsi holdout <run_id>` (max 3 looks / 30 days, all logged)
 → `rsi export <run_id>` → paper ≥ 2 weeks → `rsi parity <model_dir>` and journal audit
 → testnet → mainnet with tightened `risk_overrides`.
 
@@ -59,3 +60,5 @@ research champion → `rsi holdout <run_id>` (max 3 looks / 30 days, all logged)
 - Look at fold consistency and long/short attribution, not only the headline Sharpe.
 - A factor whose IC flips sign between halves is noise.
 - Costs dominate at 30m: check `turnover_ann`, `fees_frac`; most ideas die here.
+- Pin feature lists when comparing variants: selectors like `all` pick up newly added features and silently change the baseline.
+- A result that moves a lot when a few irrelevant columns are added is a sharp peak, not an edge (run `rsi robust`).
