@@ -193,3 +193,73 @@ Auto-generated entries per run (HRN-08); add a `- conclusion:` line under each.
 - Rules from here: no tuning against the holdout (2 looks left in this 30-day window). Next research must target
   robustness inside the research period: per-year IC stability of features, adaptive vs. long training windows,
   ensembling the neighbouring good region instead of picking the single best point, and carry-only vs. carry+forecast blends.
+
+### 20261020-224825-a72660 · r3_champ_win12 · **fail**
+- date: 2026-10-20 22:48 · parent: 20261020-203642-57357f · trials so far: 26
+- hypothesis: Regimes shift (2022 strong, 2023-24 weak, holdout weak): a 12-month rolling training window adapts faster.
+- sharpe 1.49 · dsr 0.77 · cagr 44.3% · mdd 34.5% · turnover 162x · fees 163.7% · funding -99.6% · long +119.9% / short +171.9% · ic 0.0225
+- failed gates: dsr, max_drawdown · sharpe 1.49 vs champion 1.82 (margin -0.33, need 0.15)
+
+### 20261020-224825-ef88df · r3_champ_stable · **fail**
+- date: 2026-10-20 22:48 · parent: 20261020-203642-57357f · trials so far: 26
+- hypothesis: Holdout IC collapsed (0.032 -> 0.006). Keep only factors whose yearly IC sign is consistent inside each fold training window (no look at test data), so the forecast rests on persistent effects.
+- sharpe 1.45 · dsr 0.77 · cagr 43.1% · mdd 25.6% · turnover 162x · fees 175.6% · funding -155.0% · long +115.6% / short +158.2% · ic 0.0316
+- failed gates: dsr · sharpe 1.45 vs champion 1.82 (margin -0.37, need 0.15)
+
+### 20261020-230207-a416a8 · r3_champ_win36 · **fail**
+- date: 2026-10-20 23:02 · parent: 20261020-203642-57357f · trials so far: 28
+- hypothesis: Counter-hypothesis: a longer 36-month window averages over regimes and is more stable.
+- sharpe 1.77 · dsr 0.88 · cagr 56.1% · mdd 37.3% · turnover 180x · fees 271.6% · funding -236.8% · long +383.0% / short +42.2% · ic 0.0353
+- failed gates: dsr, max_drawdown · sharpe 1.77 vs champion 1.82 (margin -0.05, need 0.15)
+
+### 20261020-230849-d4f992 · r3_champ_ens · **fail**
+- date: 2026-10-20 23:08 · parent: 20261020-203642-57357f · trials so far: 29
+- hypothesis: Reduce selection variance: average the standardised scores of the good neighbourhood (horizon 1d/2d x ridge alpha 10/100) instead of trusting the single best search point.
+- sharpe 1.44 · dsr 0.73 · cagr 41.5% · mdd 27.4% · turnover 168x · fees 173.9% · funding -119.6% · long +75.5% / short +189.3% · ic 0.0350
+- failed gates: dsr · sharpe 1.44 vs champion 1.82 (margin -0.38, need 0.15)
+
+### 20261020-231849-b7adfc · r3_carry_blend · **fail**
+- date: 2026-10-20 23:18 · parent: 20261020-203642-57357f · trials so far: 30
+- hypothesis: Holdout kept the funding income but lost the forecast IC. Anchor the score on 7d funding carry (model-free, persistent) and blend in the ridge forecast at equal weight, so the book degrades to carry when the forecast fades.
+- sharpe 0.53 · dsr 0.14 · cagr 11.2% · mdd 47.9% · turnover 40x · fees 26.4% · funding -161.5% · long -31.7% / short +60.0% · ic 0.0189
+- failed gates: sharpe, dsr, max_drawdown · sharpe 0.53 vs champion 1.82 (margin -1.29, need 0.15)
+
+### 20261021-105741-8b52ed · r3_champ_expand · **fail**
+- date: 2026-10-21 10:57 · parent: 20261020-203642-57357f · trials so far: 31
+- hypothesis: Expanding window: use all past data; most stable estimate if effects are persistent.
+- sharpe 1.75 · dsr 0.88 · cagr 55.1% · mdd 47.1% · turnover 183x · fees 264.2% · funding -265.4% · long +339.4% / short +61.9% · ic 0.0386
+- failed gates: dsr, max_drawdown · sharpe 1.75 vs champion 1.82 (margin -0.07, need 0.15)
+
+### 20261021-105742-b7adfc · r3_carry_blend · **fail**
+- date: 2026-10-21 10:57 · parent: 20261020-203642-57357f · trials so far: 30
+- hypothesis: Holdout kept the funding income but lost the forecast IC. Anchor the score on 7d funding carry (model-free, persistent) and blend in the ridge forecast at equal weight, so the book degrades to carry when the forecast fades.
+- sharpe 0.53 · dsr 0.14 · cagr 11.2% · mdd 47.9% · turnover 40x · fees 26.4% · funding -161.5% · long -31.7% / short +60.0% · ic 0.0189
+- failed gates: sharpe, dsr, max_drawdown · sharpe 0.53 vs champion 1.82 (margin -1.29, need 0.15)
+
+## Round 3 — robustness review after the failed holdout (7 trials, research period only)
+
+Method review: structure choices made by looking at the full 2022-2025 walk-forward (feature set, model family,
+horizon) are soft selection on the same period we report as OOS; DSR only counts specs. Hence this round moved
+selection *inside* each fold (stable-sign feature selection on the training window only) and tested variance
+reducers (training window, neighbourhood ensemble, carry anchor). No holdout was used.
+
+| variant | sharpe | max DD | 2023-24 mean fold SR | min fold SR | OOS IC |
+|---|---|---|---|---|---|
+| champion s11.6 | 1.82 | 29.2% | 1.08 | -0.42 | 0.032 |
+| in-fold stable selection | 1.45 | 25.6% | 1.19 | -1.90 | 0.032 |
+| 12m window | 1.49 | 34.5% | 0.58 | -3.03 | 0.023 |
+| 36m window | 1.77 | 37.3% | 0.65 | -2.28 | 0.035 |
+| expanding window | 1.75 | 47.1% | 0.41 | -4.42 | 0.039 |
+| 4-member ensemble | 1.44 | 27.4% | 0.80 | -1.28 | 0.035 |
+| carry + ridge blend | 0.53 | 47.9% | 0.59 | -4.42 | 0.019 |
+
+Conclusions
+- Every reasonable variant of this information set lands at research SR 1.4-1.8; picking among them is noise
+  next to the research->holdout gap (1.82 -> 0.41). The limit is the information, not the model plumbing.
+- Longer windows raise IC (0.039 expanding) but blow up in 2023-24 (DD 47%): the edge is regime-dependent
+  (strong in high-dispersion 2022 / 2025, weak in 2023-24 and in the holdout).
+- Naive carry blending hurts (squeeze episodes dominate when carry is the anchor at this rebalance cadence).
+- None beats the champion by the 0.15 margin; champion unchanged. No new holdout look is justified.
+- Next: new information rather than new plumbing — positioning data (open interest, top-trader and taker
+  long/short ratios from the `metrics` archive), market-wide state (breadth, aggregate funding, dispersion; DEC-03)
+  as regime conditioners, and 5m intrabar features.

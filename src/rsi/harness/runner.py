@@ -135,6 +135,10 @@ class TrainRows:
         sel = (self.t >= a) & (self.t < b)
         return self.X[sel], self.y[sel]
 
+    def years(self, prep: "Prepared", a: int, b: int) -> np.ndarray:
+        sel = (self.t >= a) & (self.t < b)
+        return (prep.panel.times[self.t[sel]] // (365 * 86_400_000)).astype(np.int64)
+
 
 def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold, rows: TrainRows | None = None) -> Model:
     tr0, tr1 = fold.train
@@ -146,7 +150,8 @@ def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold, rows: TrainRows |
     Xv = yv = None
     if n_valid:
         Xv, yv = rows.take(split, tr1)
-    return Model(ms, prep.names).fit(X, yy, Xv, yv)
+    groups = rows.years(prep, tr0, split - (spec.label.span if n_valid else 0)) if ms.select_stable else None
+    return Model(ms, prep.names).fit(X, yy, Xv, yv, groups=groups)
 
 
 def predict_rows(prep: Prepared, model: Model, i0: int, i1: int, out: np.ndarray) -> None:
@@ -167,9 +172,27 @@ def oos_scores(prep: Prepared, spec: ExperimentSpec, folds: list[Fold]) -> tuple
         m = fit_fold(prep, spec, f, rows)
         predict_rows(prep, m, *f.test, score)
         info.append({**f.as_dict(prep.panel.times), "best_iter": m.best_iter, "fit_s": round(time.time() - t0, 1),
-                     "importance": m.importance})
-        log.info(f"fold {f.k}: test {info[-1]['test'][0][:10]}..{info[-1]['test'][1][:10]} fit {info[-1]['fit_s']}s iters={m.best_iter}")
+                     "importance": m.importance, "n_selected": int(m.keep.sum()) if m.keep is not None else len(prep.names)})
+        log.info(f"fold {f.k}: test {info[-1]['test'][0][:10]}..{info[-1]['test'][1][:10]} fit {info[-1]['fit_s']}s "
+                 f"iters={m.best_iter} cols={info[-1]['n_selected']}")
     return score, info
+
+
+def ensemble_scores(spec: ExperimentSpec, panel: Panel) -> tuple[np.ndarray, list[dict]]:
+    import warnings
+    h = harness_config()
+    scores, finfo = [], []
+    for i, ov in enumerate(spec.ensemble):
+        member = spec.with_overrides({**ov, "ensemble": []}, name=f"{spec.name}#m{i}")
+        pm = prepare(member, panel)
+        fm = walk_forward(panel.times, h, member.label.span, test_months=member.test_months, train_months=member.train_months)
+        s_m, info = oos_scores(pm, member, fm)
+        scores.append(s_m)
+        finfo += [{**x, "member": i} for x in info]
+        log.info(f"ensemble member {i} {ov} done")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanmean(np.stack(scores), axis=0), finfo
 
 
 def fold_metrics(res: BacktestResult, panel: Panel, folds: list[Fold], bars_per_year: int) -> list[dict]:
@@ -219,8 +242,11 @@ def run(spec: ExperimentSpec, note: str | None = None, save: bool = True, ledger
     t_start = time.time()
     panel = research_panel(spec)
     prep = prepare(spec, panel)
-    folds = walk_forward(panel.times, h, spec.label.span, test_months=spec.test_months)
-    score, finfo = oos_scores(prep, spec, folds)
+    folds = walk_forward(panel.times, h, spec.label.span, test_months=spec.test_months, train_months=spec.train_months)
+    if spec.ensemble:
+        score, finfo = ensemble_scores(spec, panel)
+    else:
+        score, finfo = oos_scores(prep, spec, folds)
     n_prev, sr_var = ledger.trial_stats(h.version)
     seen = any(r["spec_hash"] == spec.spec_hash for r in ledger.runs(h.version))
     n_trials = n_prev + (0 if seen else 1)

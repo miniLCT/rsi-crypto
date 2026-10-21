@@ -30,7 +30,12 @@ class ExperimentSpec(BaseModel):
     panel_top_k: int = 150
     # optional overrides of the walk-forward cadence (cheaper iterations); gates still apply
     test_months: int | None = None
+    # training window (model choice): -1 harness default, 0 expanding, n rolling months
+    train_months: int = -1
     search_space: dict[str, list[Any]] = Field(default_factory=dict)
+    # score ensemble: each entry is a set of dotted overrides defining one member (label/model/features);
+    # members' standardised OOS scores are averaged, then traded with this spec's strategy and risk
+    ensemble: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _short_needs_stop(self):

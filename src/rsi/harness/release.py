@@ -32,7 +32,9 @@ def holdout(run_id: str, ledger: Ledger | None = None, force: bool = False) -> d
     panel = full_panel(spec)
     prep = prepare(spec, panel)
     folds = walk_forward(panel.times, h, spec.label.span, end=h.periods.holdout_end,
-                         first_test=h.periods.holdout_start, test_months=3)
+                         first_test=h.periods.holdout_start, test_months=3, train_months=spec.train_months)
+    if spec.ensemble:
+        raise NotImplementedError("holdout of score ensembles is not supported yet")
     score, _ = oos_scores(prep, spec, folds)
     n_trials, sr_var = ledger.trial_stats(h.version)
     ev = evaluate(prep, spec, score, folds[0].test[0], folds[-1].test[1], folds, n_trials, sr_var)
@@ -52,11 +54,13 @@ def export(run_id: str, out_dir: Path | None = None, ledger: Ledger | None = Non
     row = ledger.get(run_id)
     spec = ExperimentSpec(**json.loads(row["spec_json"]))
     research_m = json.loads(row["metrics_json"])
+    if spec.ensemble:
+        raise NotImplementedError("export of score ensembles is not supported yet (multi-model artifact)")
     panel = full_panel(spec)
     prep = prepare(spec, panel)
     end = panel.T
     gap = spec.label.span + h.walk_forward.embargo_bars
-    months = h.walk_forward.train_months or 120
+    months = (h.walk_forward.train_months if spec.train_months == -1 else spec.train_months) or 120
     start = max(0, panel.index_of(int(panel.times[-1]) - months * 30 * 86_400_000))
     fold = Fold(0, (start, end - gap), (end, end))
     model = fit_fold(prep, spec, fold)

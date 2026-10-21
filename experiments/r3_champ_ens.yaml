@@ -1,0 +1,91 @@
+features:
+  include:
+  - all
+  - -group:calendar
+  neutralize: false
+  transform: rank
+hypothesis: 'Reduce selection variance: average the standardised scores of the good
+  neighbourhood (horizon 1d/2d x ridge alpha 10/100) instead of trusting the single
+  best search point.'
+label:
+  clip: 5.0
+  horizon: 96
+  include_funding: true
+  kind: fwd_logret
+  vol_norm: true
+  vol_window: 336
+  xs_demean: true
+model:
+  early_stop_metric: corr
+  early_stopping: 50
+  kind: ridge
+  num_boost_round: 400
+  params: {}
+  ridge_alpha: 10.0
+  seed: 7
+  train_stride: 4
+  valid_frac: 0.15
+  weights: {}
+name: r3_champ_ens
+panel_top_k: 150
+parent: 20261020-203642-57357f
+risk:
+  adv_cap: 0.02
+  cooldown_bars: 16
+  daily_loss_halt: null
+  dd_halt: null
+  dd_halt_bars: 336
+  dd_reduce: null
+  dd_reduce_scale: 0.5
+  exchange_leverage: 3.0
+  hard_stop_vol: 4.5
+  hold_horizon_bars: 48
+  maint_margin_rate: 0.01
+  margin_usage_max: 0.6
+  max_gross: 3.0
+  max_hold_bars: null
+  max_net: 1.0
+  max_weight: 0.05
+  min_notional_usd: 10.0
+  min_trade_frac: 0.25
+  stop_loss_vol: null
+  trail_giveback_vol: 1.0
+  trail_start_vol: null
+  vol_lookback: 672
+  vol_scale_max: 4.0
+  vol_scale_min: 0.25
+  vol_target: 0.3
+strategy:
+  allow_long: true
+  allow_short: true
+  beta_neutral: true
+  entry_z: 1.0
+  exit_buffer: 0.35
+  exit_z: 0.25
+  gross: 1.0
+  kind: xs_longshort
+  long_frac: 0.2
+  max_names: 10
+  min_abs_score: 0.0
+  min_names: 10
+  rebalance_bars: 8
+  short_frac: 0.2
+  smooth_bars: 1
+  weighting: equal
+test_months: null
+universe:
+  adv_days: 30
+  keep_rank: 120
+  kind: top_liquid
+  min_history_days: 30
+  size: 100
+  symbols: []
+ensemble:
+- label.horizon: 96
+  model.ridge_alpha: 10.0
+- label.horizon: 96
+  model.ridge_alpha: 100.0
+- label.horizon: 48
+  model.ridge_alpha: 10.0
+- label.horizon: 48
+  model.ridge_alpha: 100.0

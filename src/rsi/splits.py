@@ -30,8 +30,12 @@ class Fold:
 
 
 def walk_forward(times: np.ndarray, hcfg: HarnessConfig, label_span: int, end: str | None = None,
-                 first_test: str | None = None, test_months: int | None = None) -> list[Fold]:
+                 first_test: str | None = None, test_months: int | None = None,
+                 train_months: int | None = -1) -> list[Fold]:
+    """`train_months`: -1 = harness default, 0 = expanding window, n = rolling n months (a model choice;
+    test windows, purge and embargo stay those of the harness)."""
     wf = hcfg.walk_forward
+    tm = wf.train_months if train_months == -1 else (train_months or None)
     start_ms = to_ms(hcfg.periods.research_start)
     end_ms = to_ms(end or hcfg.periods.research_end)
     t = pd.Timestamp(first_test or wf.first_test, tz="UTC")
@@ -45,8 +49,8 @@ def walk_forward(times: np.ndarray, hcfg: HarnessConfig, label_span: int, end: s
         j0 = int(np.searchsorted(times, to_ms(t)))
         j1 = int(np.searchsorted(times, t_end))
         tr1 = j0 - gap
-        if wf.train_months:
-            tr0 = max(i_start, int(np.searchsorted(times, to_ms(t - pd.DateOffset(months=wf.train_months)))))
+        if tm:
+            tr0 = max(i_start, int(np.searchsorted(times, to_ms(t - pd.DateOffset(months=tm)))))
         else:
             tr0 = i_start
         if tr1 > tr0 and j1 > j0:
