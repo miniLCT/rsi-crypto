@@ -391,3 +391,37 @@ Single-factor screen (2022-2025, rank IC vs 1d funding-inclusive return):
 - `oi_turnover_rel` IC +0.014 but corr 0.92 with `vol_surge_48` -> redundant.
 - Recency weighting refuted (adaptivity again costs more than it gains).
 Next: feature-dropout robustness of the positioning variant before any holdout look.
+
+### 20261021-154043-ee0914 · r5_positioning~robust0 · **fail**
+- date: 2026-10-21 15:40 · parent: 20261021-152333-6a341a · trials so far: 39
+- hypothesis: robustness: 15% feature dropout of 20261021-152333-6a341a
+- sharpe 1.11 · dsr 0.48 · cagr 30.3% · mdd 31.7% · turnover 220x · fees 233.5% · funding -105.5% · long +7.5% / short +158.5% · ic 0.0297
+- failed gates: dsr, max_drawdown · sharpe 1.11 vs champion 1.82 (margin -0.70, need 0.15)
+
+### 20261021-154043-7c7d9c · r5_positioning~robust0 · **fail**
+- date: 2026-10-21 15:40 · parent: 20261021-152333-6a341a · trials so far: 39
+- hypothesis: robustness: 15% feature dropout of 20261021-152333-6a341a
+- sharpe 1.35 · dsr 0.64 · cagr 38.9% · mdd 32.3% · turnover 200x · fees 226.8% · funding -126.4% · long +44.2% / short +196.6% · ic 0.0319
+- failed gates: dsr, max_drawdown · sharpe 1.35 vs champion 1.82 (margin -0.46, need 0.15)
+
+### 20261021-155136-d5755c · r5_positioning~robust1 · **fail**
+- date: 2026-10-21 15:51 · parent: 20261021-152333-6a341a · trials so far: 39
+- hypothesis: robustness: 15% feature dropout of 20261021-152333-6a341a
+- sharpe 1.76 · dsr 0.85 · cagr 56.1% · mdd 25.8% · turnover 157x · fees 225.0% · funding -156.2% · long +129.5% / short +302.1% · ic 0.0316
+- failed gates: dsr · sharpe 1.76 vs champion 1.82 (margin -0.06, need 0.15)
+
+### 20261021-155137-6c9663 · r5_positioning~robust1 · **fail**
+- date: 2026-10-21 15:51 · parent: 20261021-152333-6a341a · trials so far: 39
+- hypothesis: robustness: 15% feature dropout of 20261021-152333-6a341a
+- sharpe 1.22 · dsr 0.56 · cagr 33.8% · mdd 26.8% · turnover 212x · fees 217.7% · funding -77.6% · long +24.9% / short +173.7% · ic 0.0332
+- failed gates: dsr · sharpe 1.22 vs champion 1.82 (margin -0.60, need 0.15)
+- Robustness of the positioning variant 20261021-152333-6a341a (4 re-runs, 15% feature dropout):
+  sharpe [1.11, 1.22, 1.35, 1.76] -> median 1.29 vs the champion's 1.54 under the same procedure.
+  The 1.93 is another sharp peak; positioning does not raise the robust edge. No holdout look spent.
+
+## Status after 5 rounds (34 selection trials)
+- Robust research-period edge of the cross-sectional 2-day ridge family: ~1.5 Sharpe (feature-dropout median).
+- Out-of-sample (holdout) it delivered 0.41: the binding problem is decay over time, not features or plumbing.
+- Refuted: trees, shorter/expanding/recency-weighted training, dispersion-based sizing, naive carry blending,
+  positioning as extra columns. Kept as infrastructure: in-fold selection, ensembles, regime interactions,
+  positioning data (archive + live), robustness check.
