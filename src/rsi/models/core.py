@@ -39,6 +39,7 @@ class ModelSpec(BaseModel):
     select_stable: bool = False
     select_min_frac: float = 0.75
     select_min_abs_ic: float = 0.003
+    recency_halflife_days: float | None = None   # sample weight 0.5 ** (age / half-life), age from the training end
     seed: int = 7
 
 
@@ -74,7 +75,10 @@ class Model:
 
     # ------------------------------------------------------------------ fit
     def fit(self, X: np.ndarray, y: np.ndarray, Xv: np.ndarray | None = None, yv: np.ndarray | None = None,
-            groups: np.ndarray | None = None) -> "Model":
+            groups: np.ndarray | None = None, age_days: np.ndarray | None = None) -> "Model":
+        self._w = None
+        if self.spec.recency_halflife_days and age_days is not None:
+            self._w = 0.5 ** (np.asarray(age_days, dtype=np.float64) / self.spec.recency_halflife_days)
         if self.spec.select_stable and groups is not None:
             self.keep = self.stable_columns(X, y, groups, self.spec.select_min_frac, self.spec.select_min_abs_ic)
             if not self.keep.any():
@@ -93,7 +97,7 @@ class Model:
         if k == "lgbm":
             import lightgbm as lgb
             params = {**DEFAULT_LGBM, **self.spec.params, "seed": self.spec.seed}
-            dtr = lgb.Dataset(X, y, feature_name=[c.replace(":", "__") for c in cols], free_raw_data=True)
+            dtr = lgb.Dataset(X, y, weight=self._w, feature_name=[c.replace(":", "__") for c in cols], free_raw_data=True)
             valid = [lgb.Dataset(Xv, yv, reference=dtr)] if Xv is not None and len(Xv) else []
             cbs = [lgb.early_stopping(self.spec.early_stopping, first_metric_only=True, verbose=False)] if valid else []
             feval = None
@@ -114,20 +118,24 @@ class Model:
         elif k == "ridge":
             # chunked normal equations: memory stays ~ one chunk regardless of rows x columns
             n, F = X.shape
+            w = self._w if self._w is not None else np.ones(n)
+            W = w.sum()
             s1, s2 = np.zeros(F), np.zeros(F)
             for i in range(0, n, 200_000):
                 c = np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64))
-                s1 += c.sum(0)
-                s2 += (c * c).sum(0)
-            mu = s1 / n
-            sd = np.sqrt(np.maximum(s2 / n - mu * mu, 0)) + 1e-12
+                wi = w[i:i + 200_000, None]
+                s1 += (wi * c).sum(0)
+                s2 += (wi * c * c).sum(0)
+            mu = s1 / W
+            sd = np.sqrt(np.maximum(s2 / W - mu * mu, 0)) + 1e-12
             A = np.zeros((F, F))
             b = np.zeros(F)
             for i in range(0, n, 200_000):
                 Z = (np.nan_to_num(np.asarray(X[i:i + 200_000], dtype=np.float64)) - mu) / sd
-                A += Z.T @ Z
-                b += Z.T @ y[i:i + 200_000]
-            A += self.spec.ridge_alpha * n * 1e-3 * np.eye(F)
+                wi = w[i:i + 200_000]
+                A += Z.T @ (Z * wi[:, None])
+                b += Z.T @ (y[i:i + 200_000] * wi)
+            A += self.spec.ridge_alpha * W * 1e-3 * np.eye(F)
             beta = np.linalg.solve(A, b)
             self.obj = {"mu": mu, "sd": sd, "beta": beta}
             self.importance = {c: float(abs(b)) for c, b in zip(cols, beta)}

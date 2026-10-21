@@ -142,6 +142,10 @@ class LiveRunner:
         extra = list(self._load_state().get("portfolio", {}).get("symbols", []))
         self.feed = LiveFeed(self.data_client, data_config(), self.manifest["window_bars"], extra_symbols=None,
                              only_symbols=None if self.spec.universe.kind == "top_liquid" else self.spec.universe.symbols)
+        from rsi.features import registry as _reg
+        self.positioning_bars = max([_reg.get(n).lookback for n in self.spec.features.compute_names()
+                                     if _reg.get(n).group == "positioning"] or [0])
+        self.feed.with_metrics = self.positioning_bars > 0
         await self.feed.bootstrap()
         if cfg.mode == "paper":
             self.broker = PaperBroker()
@@ -214,6 +218,7 @@ class LiveRunner:
     async def cycle(self, bar_open: int) -> dict:
         t0 = time.time()
         missing = await self.feed.update(bar_open)
+        await self.feed.update_metrics(bar_open, self.positioning_bars + 8)
         if self.feed.symbols != self.port.symbols:
             self._build_books(self.feed.symbols)
         win: Panel = self.feed.window(bar_open)

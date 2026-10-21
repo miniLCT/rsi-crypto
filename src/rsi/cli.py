@@ -32,6 +32,17 @@ def data_sync(symbols: Optional[list[str]] = typer.Option(None, "--symbol", "-s"
     console.print(asyncio.run(vision.sync(cfg, symbols, datasets)))
 
 
+@data_app.command("metrics")
+def data_metrics(plan: Path = Path("data/meta/metrics_plan.json"), concurrency: int = 64):
+    """Download daily positioning metrics (OI, long/short ratios, taker ratio) for planned symbol-days."""
+    from rsi.config import data_config
+    from rsi.data import vision
+    cfg = data_config()
+    cfg.download.concurrency = concurrency
+    pairs = json.loads(plan.read_text())
+    console.print(asyncio.run(vision.download_files(cfg, vision.metrics_keys(cfg.market, pairs))))
+
+
 @data_app.command("ingest")
 def data_ingest(workers: int = 12):
     """Raw zips -> per-symbol parquet lake."""
@@ -39,6 +50,14 @@ def data_ingest(workers: int = 12):
     from rsi.data import lake
     out = lake.ingest(data_config(), workers=workers)
     console.print(f"{len(out)} symbols ingested")
+
+
+@data_app.command("ingest-metrics")
+def data_ingest_metrics(workers: int = 12):
+    from rsi.config import data_config
+    from rsi.data import lake
+    r = lake.ingest_metrics(data_config(), workers)
+    console.print(f"{sum(1 for v in r.values() if v)} symbols with metrics")
 
 
 @data_app.command("quality")
@@ -84,7 +103,7 @@ def feat_build(selectors: list[str] = typer.Argument(None), jobs: int = 3, resea
         from rsi.data.panel import save_panel
         p = research_panel(spec)
         d = cache_dir() / "panel" / f"slice-{p.fingerprint}"
-        if not (d / "meta.json").exists():
+        if not (d / "meta.json").exists() or any(not (d / f"{f}.npy").exists() for f in p.data):
             save_panel(p, d)
     else:
         p, d = full, cache_dir() / "panel" / full.fingerprint

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from rsi.config import DataConfig
-from rsi.data.panel import Panel, frames_to_panel
+from rsi.data.panel import METRIC_FIELDS, Panel, frames_to_panel, metrics_to_bars
 from rsi.live.binance import BinanceFutures, kline_rows_to_frame
 from rsi.utils.log import get_logger
 from rsi.utils.timeutil import interval_ms, now_ms
@@ -50,6 +50,9 @@ class LiveFeed:
         self.fu: dict[str, pd.DataFrame] = {}
         self._funding_cursor = 0
         self.exchange_info: dict = {}
+        self.with_metrics = False
+        self.mt: dict[str, pd.DataFrame] = {}
+        self.metrics_top = 200          # positioning is fetched for the top-N by 30d ADV (superset of the hold buffer)
 
     # ------------------------------------------------------------------ symbols
     async def refresh_symbols(self) -> list[str]:
@@ -175,10 +178,45 @@ class LiveFeed:
                 if df is not None and len(df) > keep:
                     d[s] = df.iloc[-keep:].reset_index(drop=True)
 
+    def _metric_symbols(self) -> list[str]:
+        adv = {s: float(df["quote_volume"].iloc[-1440:].mean()) for s, df in self.kl.items() if df is not None and len(df)}
+        return sorted(adv, key=adv.get, reverse=True)[: self.metrics_top]
+
+    async def update_metrics(self, bar_open: int, history_bars: int) -> None:
+        """Backfill / refresh 5m positioning snapshots for the most liquid symbols."""
+        if not self.with_metrics:
+            return
+        sem = asyncio.Semaphore(4)
+        need = set(self._metric_symbols())
+
+        async def one(sym):
+            async with sem:
+                old = self.mt.get(sym)
+                start = (bar_open - history_bars * self.step) if old is None or old.empty else int(old["ts"].iloc[-1]) + 1
+                frames = []
+                cur = start
+                try:
+                    while cur <= bar_open + self.step:
+                        df = await self.client.positioning(sym, start=cur, limit=500)
+                        if df.empty:
+                            break
+                        frames.append(df)
+                        if len(df) < 500:
+                            break
+                        cur = int(df["ts"].iloc[-1]) + 1
+                except Exception as e:  # noqa: BLE001
+                    log.debug(f"positioning {sym}: {e}")
+                new = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["ts", *METRIC_FIELDS])
+                self.mt[sym] = _upsert(old, new, "ts").iloc[-(history_bars * 6 + 200):]
+        await asyncio.gather(*(one(s) for s in need))
+
     def window(self, last_bar_open: int, intervals: dict[str, float] | None = None) -> Panel:
         times = np.arange(last_bar_open - (self.window_bars - 1) * self.step, last_bar_open + 1, self.step, dtype=np.int64)
         fr = self._funding_frames(intervals or {})
-        return frames_to_panel(times, self.symbols, self.kl, self.pr, fr, self.interval)
+        p = frames_to_panel(times, self.symbols, self.kl, self.pr, fr, self.interval)
+        if self.with_metrics:
+            p.data.update(metrics_to_bars(times, self.mt, self.symbols, self.interval))
+        return p
 
 
 def _upsert(old: pd.DataFrame | None, new: pd.DataFrame, key: str) -> pd.DataFrame:

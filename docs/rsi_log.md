@@ -346,3 +346,48 @@ Broadcast columns cannot rank coins, so regime enters via (a) exposure scaling, 
   sharpe [1.77, 1.65, 1.67, 1.11, 1.43, 1.40] -> median 1.54, min 1.11; max DD median 30.4% (gate 30%) -> borderline FAIL.
   Reading: a real research-period edge (~1.5) exists and survives feature dropout, but the reported 1.82 carries
   ~0.3 of selection optimism. The holdout drop (0.41) is a second, separate problem: decay over time, not feature luck.
+
+### 20261021-145946-e90b13 · r5_champ_pinned · **fail**
+- date: 2026-10-21 14:59 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: Control with the champion feature list pinned explicitly (82 base features).
+- sharpe 1.82 · dsr 0.89 · cagr 57.9% · mdd 29.2% · turnover 167x · fees 258.2% · funding -186.6% · long +261.9% / short +167.9% · ic 0.0324
+- failed gates: dsr · sharpe 1.82 vs champion 1.82 (margin +0.00, need 0.15)
+
+### 20261021-152056-e90b13 · r5_champ_pinned · **fail**
+- date: 2026-10-21 15:20 · parent: 20261020-203642-57357f · trials so far: 36
+- hypothesis: Control with the champion feature list pinned explicitly (82 base features).
+- sharpe 1.82 · dsr 0.89 · cagr 57.9% · mdd 29.2% · turnover 167x · fees 258.2% · funding -186.6% · long +261.9% / short +167.9% · ic 0.0324
+- failed gates: dsr · sharpe 1.82 vs champion 1.82 (margin +0.00, need 0.15)
+
+### 20261021-152333-6a341a · r5_positioning · **fail**
+- date: 2026-10-21 15:23 · parent: 20261020-203642-57357f · trials so far: 37
+- hypothesis: Add positioning (OI growth, OI-price divergence, leverage vs activity, top-trader / crowd long-short vs own history, smart-retail divergence) to the pinned champion set: crowding and leverage should explain where the cross-sectional edge fails (squeezes, liquidations).
+- sharpe 1.93 · dsr 0.93 · cagr 63.1% · mdd 30.7% · turnover 167x · fees 265.9% · funding -191.4% · long +211.0% / short +283.5% · ic 0.0319
+- failed gates: max_drawdown · sharpe 1.93 vs champion 1.82 (margin +0.11, need 0.15)
+
+### 20261021-152334-9e2043 · r5_positioning_recency · **fail**
+- date: 2026-10-21 15:23 · parent: r5_positioning · trials so far: 37
+- hypothesis: Edge decays over time: weight training samples by recency (60d half-life) inside the 24m window instead of shortening it.
+- sharpe 1.22 · dsr 0.52 · cagr 34.8% · mdd 29.3% · turnover 165x · fees 155.8% · funding -68.2% · long +20.5% / short +186.1% · ic 0.0157
+- failed gates: dsr · sharpe 1.22 vs champion 1.82 (margin -0.60, need 0.15)
+
+## Round 5 — positioning data (open interest, long/short ratios)
+
+Data: `metrics` archive (5m OI value, top-trader account/position L/S, all-account L/S), 304k symbol-days for names
+near the top-160, 2021-12 onward; one snapshot per bar, stamped <= open + 20m (`panel.METRIC_LAG_MS`), identical rule
+in the live REST feed (30-day API history => all positioning windows <= ~8 days). Ingestion bug caught by a coverage
+check: pandas 3 parses datetimes at microsecond resolution, so `astype(int64)//1e6` gave seconds; fixed with a
+resolution-independent conversion.
+
+| variant (pinned champion feature list) | sharpe | max DD | CAGR | DSR |
+|---|---|---|---|---|
+| control (reproduces the champion exactly) | 1.82 | 29.2% | 57.9% | 0.89 |
+| + 10 positioning features | 1.93 | 30.7% | 63.1% | 0.93 |
+| + positioning + 60d recency weighting | 1.22 | 29.3% | 34.8% | 0.52 |
+
+Single-factor screen (2022-2025, rank IC vs 1d funding-inclusive return):
+- `oi_chg_336` IC -0.035, same sign in both halves (-0.042 / -0.028); corr 0.59 with 7d momentum. OI build-up predicts underperformance.
+- `smart_retail_div` IC -0.014, identical in both halves; max corr 0.22 -> genuinely new information.
+- `oi_turnover_rel` IC +0.014 but corr 0.92 with `vol_surge_48` -> redundant.
+- Recency weighting refuted (adaptivity again costs more than it gains).
+Next: feature-dropout robustness of the positioning variant before any holdout look.

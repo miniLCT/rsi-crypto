@@ -43,7 +43,9 @@ def git_sha() -> str:
 def full_panel(spec: ExperimentSpec) -> Panel:
     h = harness_config()
     start = (pd.Timestamp(h.periods.research_start) - pd.Timedelta(days=WARMUP_DAYS)).strftime("%Y-%m-%d")
-    return build_panel(data_config(), start, h.periods.holdout_end, top_k=spec.panel_top_k)
+    from rsi.data.panel import attach_metrics
+    p = build_panel(data_config(), start, h.periods.holdout_end, top_k=spec.panel_top_k)
+    return attach_metrics(p, data_config()) if (data_config().lake_dir / "metrics").exists() else p
 
 
 def research_panel(spec: ExperimentSpec) -> Panel:
@@ -156,8 +158,13 @@ def fit_fold(prep: Prepared, spec: ExperimentSpec, fold: Fold, rows: TrainRows |
     Xv = yv = None
     if n_valid:
         Xv, yv = rows.take(split, tr1)
-    groups = rows.years(prep, tr0, split - (spec.label.span if n_valid else 0)) if ms.select_stable else None
-    return Model(ms, prep.names).fit(X, yy, Xv, yv, groups=groups)
+    end = split - (spec.label.span if n_valid else 0)
+    groups = rows.years(prep, tr0, end) if ms.select_stable else None
+    age = None
+    if ms.recency_halflife_days:
+        sel = (rows.t >= tr0) & (rows.t < end)
+        age = (prep.panel.times[end - 1] - prep.panel.times[rows.t[sel]]) / 86_400_000
+    return Model(ms, prep.names).fit(X, yy, Xv, yv, groups=groups, age_days=age)
 
 
 def predict_rows(prep: Prepared, model: Model, i0: int, i1: int, out: np.ndarray) -> None:

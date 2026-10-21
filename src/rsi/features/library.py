@@ -446,3 +446,54 @@ def _mkt_funding_z(fv: FrameView) -> pd.DataFrame:
 def _btc_rv_336(fv: FrameView) -> pd.DataFrame:
     c = fv.column("close", BTC)
     return fv.broadcast(np.log(c).diff().rolling(336, min_periods=336).std())
+
+
+# ---------------------------------------------------------------- positioning (open interest, long/short ratios)
+# Fields come from 5m snapshots, one per bar (see panel.METRIC_LAG_MS); short gaps are bridged for 2 bars.
+def _m(fv: FrameView, field: str) -> pd.DataFrame:
+    return fv.memo(f"_m_{field}", lambda: fv.get(field).where(lambda x: x > 0).ffill(limit=2))
+
+
+def _oi_chg(fv: FrameView, n: int) -> pd.DataFrame:
+    oi = _m(fv, "oi_value")
+    return np.log(oi / oi.shift(n))
+
+
+for _n in (16, 48, 336):
+    register_partial(f"oi_chg_{_n}", _oi_chg, lookback=_n + 3, group="positioning",
+                     doc="log change of open interest (USD)", n=_n)
+
+
+@register("oi_price_div_48", lookback=52, group="positioning", doc="1d OI growth minus 1d price return (crowding build-up)")
+def _oi_price_div(fv: FrameView) -> pd.DataFrame:
+    return _oi_chg(fv, 48) - np.log(fv.close / fv.close.shift(48))
+
+
+@register("oi_turnover_rel", lookback=336 + 48 + 3, group="positioning",
+          doc="log(OI / 1d quote volume) relative to its 7d mean: leverage vs activity")
+def _oi_turnover(fv: FrameView) -> pd.DataFrame:
+    # positioning history is only 30 days deep on the live REST API, so windows stay within ~8 days
+    x = np.log(_m(fv, "oi_value") / fv.quote_volume.rolling(48, min_periods=48).sum().where(lambda v: v > 0))
+    return x - x.rolling(336, min_periods=168).mean()
+
+
+def _ls_rel(fv: FrameView, field: str, n: int) -> pd.DataFrame:
+    x = np.log(_m(fv, field))
+    return x - x.rolling(n, min_periods=n // 2).mean()
+
+
+for _f in ("top_pos_ls", "top_acct_ls", "global_ls"):
+    register_partial(f"{_f}_rel_336", _ls_rel, lookback=339, group="positioning",
+                     doc=f"log {_f} vs its own 7d mean", field=_f, n=336)
+
+
+@register("smart_retail_div", lookback=3, group="positioning",
+          doc="log(top-trader position L/S) - log(all-account L/S): smart money vs crowd")
+def _smart_retail(fv: FrameView) -> pd.DataFrame:
+    return np.log(_m(fv, "top_pos_ls")) - np.log(_m(fv, "global_ls"))
+
+
+@register("smart_retail_div_chg_48", lookback=52, group="positioning")
+def _smart_retail_chg(fv: FrameView) -> pd.DataFrame:
+    d = np.log(_m(fv, "top_pos_ls")) - np.log(_m(fv, "global_ls"))
+    return d - d.shift(48)

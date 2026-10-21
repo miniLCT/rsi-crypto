@@ -132,6 +132,20 @@ class BinanceFutures:
     async def funding_history(self, symbol: str, limit: int = 1000, start: int | None = None) -> list:
         return await self.request("GET", "/fapi/v1/fundingRate", {"symbol": symbol, "limit": limit, "startTime": start})
 
+    async def positioning(self, symbol: str, start: int | None = None, limit: int = 500) -> "pd.DataFrame":
+        """5m open interest + long/short ratios, same fields as the `metrics` archive (30 days of history max)."""
+        import pandas as pd
+        eps = {"oi_value": ("/futures/data/openInterestHist", "sumOpenInterestValue"),
+               "top_acct_ls": ("/futures/data/topLongShortAccountRatio", "longShortRatio"),
+               "top_pos_ls": ("/futures/data/topLongShortPositionRatio", "longShortRatio"),
+               "global_ls": ("/futures/data/globalLongShortAccountRatio", "longShortRatio")}
+        cols = {}
+        for f, (path, key) in eps.items():
+            rows = await self.request("GET", path, {"symbol": symbol, "period": "5m", "limit": limit, "startTime": start})
+            cols[f] = pd.Series({int(r["timestamp"]): float(r[key]) for r in rows}, dtype="float64")
+        df = pd.DataFrame(cols)
+        return df.rename_axis("ts").reset_index().sort_values("ts")
+
     async def funding_info(self) -> list:
         return await self.request("GET", "/fapi/v1/fundingInfo")
 

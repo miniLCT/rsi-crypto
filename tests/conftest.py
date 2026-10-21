@@ -25,12 +25,16 @@ def make_panel(T: int = 3000, S: int = 12, seed: int = 0, start_ms: int = 1_600_
     fr[::16] = rng.normal(1e-4, 2e-4, (len(range(0, T, 16)), S))
     fih = np.where(np.isfinite(fr), 8.0, np.nan)
     data = dict(open=open_, high=high, low=low, close=close, volume=vol, quote_volume=qv, trades=trades,
-                taker_buy_quote_volume=tbq, premium=prem, funding_rate=fr, funding_interval_h=fih)
+                taker_buy_quote_volume=tbq, premium=prem, funding_rate=fr, funding_interval_h=fih,
+                oi_value=qv.cumsum(0) / np.arange(1, T + 1)[:, None] * rng.uniform(5, 20, S)[None, :],
+                top_acct_ls=np.exp(rng.normal(0.3, 0.2, (T, S))), top_pos_ls=np.exp(rng.normal(0.1, 0.2, (T, S))),
+                global_ls=np.exp(rng.normal(0.4, 0.3, (T, S))))
     # late listing and a delisting
     for f in data:
         data[f][: T // 3, 3] = np.nan
         data[f][2 * T // 3:, 4] = np.nan
-    assert set(data) == set(PANEL_FIELDS)
+    from rsi.data.panel import METRIC_FIELDS
+    assert set(data) == set(PANEL_FIELDS) | set(METRIC_FIELDS)
     return Panel(times, symbols, data, "30m", {"fingerprint": f"synthetic-{seed}-{T}-{S}"})
 
 
